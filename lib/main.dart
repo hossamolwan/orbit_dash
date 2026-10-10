@@ -192,8 +192,8 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                       ),
                     ),
                     const Spacer(),
-                    _scorePill('BEST', '$_best'),
                     if (_state == RunState.playing) ...[
+                      _scorePill('BEST', '$_best'),
                       const SizedBox(width: 10),
                       IconButton(
                         onPressed: _pause,
@@ -228,32 +228,33 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                               gemLane: _gemLane,
                             ),
                           ),
-                          Positioned(
-                            top: 22,
-                            child: Column(
-                              children: [
-                                const Text(
-                                  'SCORE',
-                                  style: TextStyle(
-                                    color: Colors.white38,
-                                    letterSpacing: 3,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.bold,
+                          if (_state == RunState.playing)
+                            Positioned(
+                              top: 22,
+                              child: Column(
+                                children: [
+                                  const Text(
+                                    'SCORE',
+                                    style: TextStyle(
+                                      color: Colors.white54,
+                                      letterSpacing: 2.5,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                   ),
-                                ),
-                                Text(
-                                  '$_score',
-                                  key: const ValueKey('score'),
-                                  style: const TextStyle(
-                                    fontSize: 48,
-                                    fontWeight: FontWeight.w300,
-                                    color: Colors.white,
-                                    height: 1.12,
+                                  Text(
+                                    '$_score',
+                                    key: const ValueKey('score'),
+                                    style: const TextStyle(
+                                      fontSize: 48,
+                                      fontWeight: FontWeight.w300,
+                                      color: Colors.white,
+                                      height: 1.12,
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
-                          ),
                           if (_state != RunState.playing) _overlay(),
                         ],
                       ),
@@ -324,117 +325,229 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   Widget _overlay() {
     final ready = _state == RunState.ready;
     final paused = _state == RunState.paused;
-    return Container(
-      width: 250,
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
-      decoration: BoxDecoration(
-        color: const Color(0xe6101628),
-        borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: const Color(0x334fe7ff)),
-        boxShadow: const [BoxShadow(color: Color(0x2200cfff), blurRadius: 30)],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            ready
-                ? Icons.auto_awesome
-                : paused
-                ? Icons.pause_circle_outline
-                : Icons.brightness_3,
-            color: ready ? const Color(0xff52e5ff) : const Color(0xffff5668),
-            size: 34,
-          ),
-          const SizedBox(height: 13),
-          Text(
-            ready
-                ? 'READY, PILOT?'
-                : paused
-                ? 'PAUSED'
-                : 'RUN ENDED',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 17,
-              letterSpacing: 2.4,
-              fontWeight: FontWeight.w800,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxHeight < 370;
+        final horizontalPadding = constraints.maxWidth < 330 ? 20.0 : 24.0;
+        final cardWidth = math.min(340.0, constraints.maxWidth - 28);
+        return Center(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: cardWidth,
+              maxHeight: constraints.maxHeight - 24,
+            ),
+            child: SingleChildScrollView(
+              child: Container(
+                width: double.infinity,
+                padding: EdgeInsets.symmetric(
+                  horizontal: horizontalPadding,
+                  vertical: compact ? 20 : 26,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xed0d1427),
+                  borderRadius: BorderRadius.circular(28),
+                  border: Border.all(
+                    color: const Color(0x554fe7ff),
+                    width: 1.2,
+                  ),
+                  boxShadow: const [
+                    BoxShadow(color: Color(0x2600cfff), blurRadius: 24),
+                  ],
+                ),
+                child: _overlayContent(
+                  ready: ready,
+                  paused: paused,
+                  compact: compact,
+                ),
+              ),
             ),
           ),
+        );
+      },
+    );
+  }
+
+  Widget _overlayContent({
+    required bool ready,
+    required bool paused,
+    required bool compact,
+  }) {
+    final spacing = compact ? 10.0 : 14.0;
+    final title = ready
+        ? 'READY, PILOT?'
+        : paused
+        ? 'PAUSED'
+        : 'GAME OVER';
+    final subtitle = ready
+        ? 'Dodge the red. Chase the glow.'
+        : paused
+        ? 'Your orbit is on hold.'
+        : 'You collected $_score ${_score == 1 ? 'shard' : 'shards'}.';
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          ready
+              ? Icons.auto_awesome_rounded
+              : paused
+              ? Icons.pause_circle_outline_rounded
+              : Icons.sports_score_rounded,
+          color: paused
+              ? const Color(0xff65eaff)
+              : ready
+              ? const Color(0xff52e5ff)
+              : const Color(0xffff7180),
+          size: compact ? 30 : 36,
+        ),
+        SizedBox(height: compact ? 8 : 12),
+        Text(
+          title,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: compact ? 16 : 18,
+            letterSpacing: 2.2,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        SizedBox(height: compact ? 5 : 8),
+        Text(
+          subtitle,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: Color(0xffaebbd2),
+            fontSize: 12,
+            height: 1.45,
+          ),
+        ),
+        if (ready) ...[
+          SizedBox(height: spacing),
+          _resultCard(label: 'BEST FLIGHT', value: '$_best'),
+        ],
+        if (paused) ...[
+          SizedBox(height: spacing),
+          _resultCard(label: 'CURRENT SCORE', value: '$_score'),
+        ],
+        if (!ready && !paused) ...[
+          SizedBox(height: compact ? 8 : 12),
+          const Text(
+            'FINAL SCORE',
+            style: TextStyle(
+              color: Color(0xff8c9bb5),
+              fontSize: 10,
+              letterSpacing: 2,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          Text(
+            '$_score',
+            style: TextStyle(
+              color: const Color(0xff61e9ff),
+              fontSize: compact ? 50 : 58,
+              height: 1.08,
+              fontWeight: FontWeight.w300,
+            ),
+          ),
+          SizedBox(height: compact ? 6 : 10),
+          _resultCard(label: 'BEST FLIGHT', value: '$_best'),
+        ],
+        SizedBox(height: compact ? 14 : 20),
+        SizedBox(
+          width: double.infinity,
+          height: 56,
+          child: FilledButton.icon(
+            onPressed: paused ? _resume : _start,
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xff54e6ff),
+              foregroundColor: const Color(0xff06101d),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+            ),
+            icon: Icon(
+              paused ? Icons.play_arrow_rounded : Icons.play_arrow_rounded,
+              size: 23,
+            ),
+            label: Text(
+              ready
+                  ? 'START RUN'
+                  : paused
+                  ? 'RESUME'
+                  : 'PLAY AGAIN',
+              style: const TextStyle(
+                letterSpacing: 1.6,
+                fontWeight: FontWeight.w900,
+                fontSize: 13,
+              ),
+            ),
+          ),
+        ),
+        if (paused) ...[
           const SizedBox(height: 8),
-          Text(
-            ready
-                ? 'Dodge the red. Chase the glow.'
-                : paused
-                ? 'Your orbit is on hold.'
-                : 'You collected $_score ${_score == 1 ? 'shard' : 'shards'}.',
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: Color(0xff9ca9c2),
-              fontSize: 12,
-              height: 1.5,
-            ),
-          ),
-          if (!ready && !paused) ...[
-            const SizedBox(height: 14),
-            Text(
-              '$_score',
-              style: const TextStyle(
-                color: Color(0xff61e9ff),
-                fontSize: 38,
-                fontWeight: FontWeight.w300,
-              ),
-            ),
-            Text(
-              'BEST  $_best',
-              style: const TextStyle(
-                color: Color(0xff8491ab),
-                fontSize: 10,
-                letterSpacing: 2,
-              ),
-            ),
-          ],
-          const SizedBox(height: 20),
           SizedBox(
             width: double.infinity,
             height: 48,
-            child: FilledButton(
-              onPressed: paused ? _resume : _start,
-              style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xff54e6ff),
-                foregroundColor: const Color(0xff06101d),
+            child: OutlinedButton.icon(
+              onPressed: _start,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xffc3d0e6),
+                side: const BorderSide(color: Color(0x557d8ba5)),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(15),
                 ),
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    paused
-                        ? Icons.play_arrow_rounded
-                        : Icons.play_arrow_rounded,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    ready
-                        ? 'START RUN'
-                        : paused
-                        ? 'RESUME'
-                        : 'PLAY AGAIN',
-                    style: const TextStyle(
-                      letterSpacing: 1.7,
-                      fontWeight: FontWeight.w900,
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
+              icon: const Icon(Icons.replay_rounded, size: 19),
+              label: const Text(
+                'RESTART RUN',
+                style: TextStyle(
+                  letterSpacing: 1.3,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 11,
+                ),
               ),
             ),
           ),
         ],
-      ),
+      ],
     );
   }
+
+  Widget _resultCard({required String label, required String value}) =>
+      Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
+        decoration: BoxDecoration(
+          color: const Color(0xff151e33),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0x334fe7ff)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.stars_rounded, color: Color(0xffffd66e), size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(
+                  color: Color(0xff9baac3),
+                  fontSize: 10,
+                  letterSpacing: 1.2,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            Text(
+              value,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+      );
 }
 
 class _Hazard {
