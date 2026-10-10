@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:orbit_dash/audio/game_audio_manager.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -7,7 +9,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() => runApp(const OrbitDashApp());
 
 class OrbitDashApp extends StatelessWidget {
-  const OrbitDashApp({super.key});
+  const OrbitDashApp({super.key, this.audioController});
+
+  final GameAudioController? audioController;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -17,7 +21,7 @@ class OrbitDashApp extends StatelessWidget {
       scaffoldBackgroundColor: const Color(0xff070b18),
       colorScheme: const ColorScheme.dark(primary: Color(0xff55e7ff)),
     ),
-    home: const OrbitGamePage(),
+    home: OrbitGamePage(audioController: audioController),
   );
 }
 
@@ -42,7 +46,9 @@ double hazardSpawnIntervalForScore(int score) =>
     math.max(0.85, 2.0 - score * 0.025);
 
 class OrbitGamePage extends StatefulWidget {
-  const OrbitGamePage({super.key});
+  const OrbitGamePage({super.key, this.audioController});
+
+  final GameAudioController? audioController;
 
   @override
   State<OrbitGamePage> createState() => _OrbitGamePageState();
@@ -50,6 +56,7 @@ class OrbitGamePage extends StatefulWidget {
 
 class _OrbitGamePageState extends State<OrbitGamePage>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+  late final GameAudioController _audio;
   late final Ticker _ticker;
   Duration _lastTick = Duration.zero;
   RunState _state = RunState.ready;
@@ -66,6 +73,13 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _audio = widget.audioController ?? GameAudioManager();
+    _audio.addListener(_audioSettingsChanged);
+    unawaited(
+      _audio.initialize().then((_) {
+        if (mounted) _audio.setGameState(_audioStateFor(_state));
+      }),
+    );
     _ticker = createTicker(_tick);
     SharedPreferences.getInstance().then((prefs) {
       if (mounted) setState(() => _best = prefs.getInt('orbit_dash_best') ?? 0);
@@ -74,9 +88,14 @@ class _OrbitGamePageState extends State<OrbitGamePage>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    _audio.setAppActive(state == AppLifecycleState.resumed);
     if (state != AppLifecycleState.resumed && _state == RunState.playing) {
-      _pause();
+      _pause(playEffect: false);
     }
+  }
+
+  void _audioSettingsChanged() {
+    if (mounted) setState(() {});
   }
 
   void _tick(Duration now) {
@@ -113,6 +132,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
       if (_gemLane == _lane &&
           math.min(gemDifference, 2 * math.pi - gemDifference) < 0.12) {
         _score++;
+        _audio.playEffect(GameSoundEffect.gemCollect);
         _gemAngle = (_angle + 2.4 + (_score % 3) * 0.45) % (math.pi * 2);
         _gemLane = 1 - _gemLane;
       }
@@ -132,11 +152,15 @@ class _OrbitGamePageState extends State<OrbitGamePage>
       _lastTick = Duration.zero;
     });
     _ticker.start();
+    _audio.setGameState(AudioRunState.playing);
+    _audio.playEffect(GameSoundEffect.start);
   }
 
   void _finish() {
     _state = RunState.over;
     _ticker.stop();
+    _audio.setGameState(AudioRunState.over);
+    _audio.playEffect(GameSoundEffect.collision);
     if (_score > _best) {
       _best = _score;
       SharedPreferences.getInstance().then(
@@ -145,25 +169,59 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     }
   }
 
-  void _pause() {
+  void _pause({bool playEffect = true}) {
     setState(() => _state = RunState.paused);
     _ticker.stop();
+    _audio.setGameState(AudioRunState.paused);
+    if (playEffect) _audio.playEffect(GameSoundEffect.pause);
   }
 
   void _resume() {
     setState(() => _state = RunState.playing);
     _lastTick = Duration.zero;
     _ticker.start();
+    _audio.setGameState(AudioRunState.playing);
+    _audio.playEffect(GameSoundEffect.resume);
+  }
+
+  void _returnToMenu() {
+    _ticker.stop();
+    _hazards.clear();
+    _spawnClock = 0;
+    _lastTick = Duration.zero;
+    setState(() => _state = RunState.ready);
+    _audio.setGameState(AudioRunState.menu);
   }
 
   void _tapGame() {
-    if (_state == RunState.playing) setState(() => _lane = 1 - _lane);
+    if (_state == RunState.playing) {
+      setState(() => _lane = 1 - _lane);
+      _audio.playEffect(GameSoundEffect.orbitSwitch);
+    }
+  }
+
+  AudioRunState _audioStateFor(RunState state) => switch (state) {
+    // The ready overlay is the app's actual start/menu screen.
+    RunState.ready => AudioRunState.menu,
+    RunState.playing => AudioRunState.playing,
+    RunState.paused => AudioRunState.paused,
+    RunState.over => AudioRunState.over,
+  };
+
+  void _toggleMusic() {
+    unawaited(_audio.setMusicEnabled(!_audio.musicEnabled));
+  }
+
+  void _toggleEffects() {
+    unawaited(_audio.setEffectsEnabled(!_audio.effectsEnabled));
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _ticker.dispose();
+    _audio.removeListener(_audioSettingsChanged);
+    unawaited(_audio.shutdown());
     super.dispose();
   }
 
@@ -172,6 +230,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     body: SafeArea(
       child: LayoutBuilder(
         builder: (context, constraints) {
+          final compactWidth = constraints.maxWidth < 400;
           final side = math.min(
             constraints.maxWidth,
             constraints.maxHeight * 0.87,
@@ -179,7 +238,12 @@ class _OrbitGamePageState extends State<OrbitGamePage>
           return Column(
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(24, 14, 24, 4),
+                padding: EdgeInsets.fromLTRB(
+                  compactWidth ? 12 : 24,
+                  14,
+                  compactWidth ? 12 : 24,
+                  4,
+                ),
                 child: Row(
                   children: [
                     const Icon(
@@ -188,15 +252,47 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                       size: 22,
                     ),
                     const SizedBox(width: 9),
-                    const Text(
-                      'ORBIT DASH',
-                      style: TextStyle(
-                        letterSpacing: 3,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 14,
+                    if (!compactWidth)
+                      const Text(
+                        'ORBIT DASH',
+                        style: TextStyle(
+                          letterSpacing: 3,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 14,
+                        ),
                       ),
-                    ),
                     const Spacer(),
+                    if (_state != RunState.playing &&
+                        constraints.maxWidth >= 400) ...[
+                      IconButton(
+                        onPressed: _toggleMusic,
+                        tooltip: _audio.musicEnabled ? 'Music on' : 'Music off',
+                        visualDensity: VisualDensity.compact,
+                        icon: Icon(
+                          _audio.musicEnabled
+                              ? Icons.music_note_rounded
+                              : Icons.music_off_rounded,
+                          color: _audio.musicEnabled
+                              ? const Color(0xff65eaff)
+                              : Colors.white38,
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: _toggleEffects,
+                        tooltip: _audio.effectsEnabled
+                            ? 'Sound effects on'
+                            : 'Sound effects off',
+                        visualDensity: VisualDensity.compact,
+                        icon: Icon(
+                          _audio.effectsEnabled
+                              ? Icons.volume_up_rounded
+                              : Icons.volume_off_rounded,
+                          color: _audio.effectsEnabled
+                              ? const Color(0xff65eaff)
+                              : Colors.white38,
+                        ),
+                      ),
+                    ],
                     if (_state == RunState.playing) ...[
                       _scorePill('BEST', '$_best'),
                       const SizedBox(width: 10),
@@ -213,57 +309,62 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                 ),
               ),
               Expanded(
-                child: Center(
-                  child: SizedBox(
-                    width: side,
-                    height: side,
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: _tapGame,
-                      child: Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          CustomPaint(
-                            size: Size.square(side),
-                            painter: _OrbitPainter(
-                              angle: _angle,
-                              lane: _lane,
-                              hazards: List.of(_hazards),
-                              gemAngle: _gemAngle,
-                              gemLane: _gemLane,
-                            ),
-                          ),
-                          if (_state == RunState.playing)
-                            Positioned(
-                              top: 22,
-                              child: Column(
-                                children: [
-                                  const Text(
-                                    'SCORE',
-                                    style: TextStyle(
-                                      color: Colors.white54,
-                                      letterSpacing: 2.5,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  Text(
-                                    '$_score',
-                                    key: const ValueKey('score'),
-                                    style: const TextStyle(
-                                      fontSize: 48,
-                                      fontWeight: FontWeight.w300,
-                                      color: Colors.white,
-                                      height: 1.12,
-                                    ),
-                                  ),
-                                ],
+                child: GestureDetector(
+                  key: const ValueKey('game-area'),
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _tapGame,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      SizedBox(
+                        width: side,
+                        height: side,
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            CustomPaint(
+                              key: ValueKey('orbit-lane-$_lane'),
+                              size: Size.square(side),
+                              painter: _OrbitPainter(
+                                angle: _angle,
+                                lane: _lane,
+                                hazards: List.of(_hazards),
+                                gemAngle: _gemAngle,
+                                gemLane: _gemLane,
                               ),
                             ),
-                          if (_state != RunState.playing) _overlay(),
-                        ],
+                            if (_state == RunState.playing)
+                              Positioned(
+                                top: 22,
+                                child: Column(
+                                  children: [
+                                    const Text(
+                                      'SCORE',
+                                      style: TextStyle(
+                                        color: Colors.white54,
+                                        letterSpacing: 2.5,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    Text(
+                                      '$_score',
+                                      key: const ValueKey('score'),
+                                      style: const TextStyle(
+                                        fontSize: 48,
+                                        fontWeight: FontWeight.w300,
+                                        color: Colors.white,
+                                        height: 1.12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        ),
                       ),
-                    ),
+                      if (_state != RunState.playing) _overlay(),
+                    ],
                   ),
                 ),
               ),
@@ -332,7 +433,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     final paused = _state == RunState.paused;
     return LayoutBuilder(
       builder: (context, constraints) {
-        final compact = constraints.maxHeight < 370;
+        final compact = constraints.maxHeight < 520;
         final horizontalPadding = constraints.maxWidth < 330 ? 20.0 : 24.0;
         final cardWidth = math.min(340.0, constraints.maxWidth - 28);
         return Center(
@@ -363,6 +464,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                   ready: ready,
                   paused: paused,
                   compact: compact,
+                  showAudioControls: constraints.maxWidth < 400,
                 ),
               ),
             ),
@@ -376,6 +478,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     required bool ready,
     required bool paused,
     required bool compact,
+    required bool showAudioControls,
   }) {
     final spacing = compact ? 10.0 : 14.0;
     final title = ready
@@ -457,6 +560,42 @@ class _OrbitGamePageState extends State<OrbitGamePage>
           SizedBox(height: compact ? 6 : 10),
           _resultCard(label: 'BEST FLIGHT', value: '$_best'),
         ],
+        if (showAudioControls) ...[
+          SizedBox(height: compact ? 8 : 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              IconButton(
+                onPressed: _toggleMusic,
+                tooltip: _audio.musicEnabled ? 'Music on' : 'Music off',
+                visualDensity: VisualDensity.compact,
+                icon: Icon(
+                  _audio.musicEnabled
+                      ? Icons.music_note_rounded
+                      : Icons.music_off_rounded,
+                  color: _audio.musicEnabled
+                      ? const Color(0xff65eaff)
+                      : Colors.white38,
+                ),
+              ),
+              IconButton(
+                onPressed: _toggleEffects,
+                tooltip: _audio.effectsEnabled
+                    ? 'Sound effects on'
+                    : 'Sound effects off',
+                visualDensity: VisualDensity.compact,
+                icon: Icon(
+                  _audio.effectsEnabled
+                      ? Icons.volume_up_rounded
+                      : Icons.volume_off_rounded,
+                  color: _audio.effectsEnabled
+                      ? const Color(0xff65eaff)
+                      : Colors.white38,
+                ),
+              ),
+            ],
+          ),
+        ],
         SizedBox(height: compact ? 14 : 20),
         SizedBox(
           width: double.infinity,
@@ -505,6 +644,32 @@ class _OrbitGamePageState extends State<OrbitGamePage>
               icon: const Icon(Icons.replay_rounded, size: 19),
               label: const Text(
                 'RESTART RUN',
+                style: TextStyle(
+                  letterSpacing: 1.3,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 11,
+                ),
+              ),
+            ),
+          ),
+        ],
+        if (!ready && !paused) ...[
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: OutlinedButton.icon(
+              onPressed: _returnToMenu,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xffc3d0e6),
+                side: const BorderSide(color: Color(0x557d8ba5)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(15),
+                ),
+              ),
+              icon: const Icon(Icons.home_rounded, size: 19),
+              label: const Text(
+                'MAIN MENU',
                 style: TextStyle(
                   letterSpacing: 1.3,
                   fontWeight: FontWeight.w800,
