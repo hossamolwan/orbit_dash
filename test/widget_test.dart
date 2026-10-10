@@ -49,6 +49,34 @@ void main() {
     );
   });
 
+  group('score-based difficulty', () {
+    test('preserves the starting speed and spawn interval', () {
+      expect(playerSpeedForScore(0), 1.55);
+      expect(hazardSpawnIntervalForScore(0), 2.0);
+    });
+
+    test('speed does not decrease and spawn interval does not increase', () {
+      var previousSpeed = playerSpeedForScore(0);
+      var previousInterval = hazardSpawnIntervalForScore(0);
+
+      for (var score = 1; score <= 100; score++) {
+        final speed = playerSpeedForScore(score);
+        final interval = hazardSpawnIntervalForScore(score);
+        expect(speed, greaterThanOrEqualTo(previousSpeed));
+        expect(interval, lessThanOrEqualTo(previousInterval));
+        previousSpeed = speed;
+        previousInterval = interval;
+      }
+    });
+
+    test('respects the established high-score limits', () {
+      expect(playerSpeedForScore(100), 3.05);
+      expect(hazardSpawnIntervalForScore(100), 0.85);
+      expect(playerSpeedForScore(1000), 3.05);
+      expect(hazardSpawnIntervalForScore(1000), 0.85);
+    });
+  });
+
   testWidgets('shows the start screen and starts a run', (tester) async {
     await tester.pumpWidget(const OrbitDashApp());
     await tester.pumpAndSettle();

@@ -36,6 +36,11 @@ bool isAngularCollision(double first, double second) =>
 bool hazardLifetimeExpired(double relativeAngleTravel) =>
     relativeAngleTravel >= _fullTurn;
 
+double playerSpeedForScore(int score) => 1.55 + math.min(score * 0.035, 1.5);
+
+double hazardSpawnIntervalForScore(int score) =>
+    math.max(0.85, 2.0 - score * 0.025);
+
 class OrbitGamePage extends StatefulWidget {
   const OrbitGamePage({super.key});
 
@@ -83,10 +88,10 @@ class _OrbitGamePageState extends State<OrbitGamePage>
               .toDouble();
     _lastTick = now;
     setState(() {
-      final speed = 1.55 + math.min(_score * 0.035, 1.5);
+      final speed = playerSpeedForScore(_score);
       _angle += speed * dt;
       _spawnClock += dt;
-      if (_spawnClock > math.max(0.85, 2.0 - _score * 0.025)) {
+      if (_spawnClock > hazardSpawnIntervalForScore(_score)) {
         _spawnClock = 0;
         _hazards.add(
           _Hazard(
