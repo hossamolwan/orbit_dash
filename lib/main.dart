@@ -444,7 +444,28 @@ class _Hazard {
   double relativeAngleTravel = 0;
 }
 
+class _Star {
+  const _Star(this.x, this.y, this.radius, this.paint);
+
+  final double x;
+  final double y;
+  final double radius;
+  final Paint paint;
+}
+
 class _OrbitPainter extends CustomPainter {
+  static final List<_Star> _stars = List<_Star>.generate(70, (i) {
+    final x = (math.sin(i * 127.1) * 43758.5).abs() % 1;
+    final y = (math.sin(i * 71.7 + 2) * 11923.4).abs() % 1;
+    final alpha = .12 + (i % 5) * .025;
+    return _Star(
+      x,
+      y,
+      i % 9 == 0 ? 1.2 : .65,
+      Paint()..color = Colors.white.withValues(alpha: alpha),
+    );
+  });
+
   const _OrbitPainter({
     required this.angle,
     required this.lane,
@@ -474,13 +495,11 @@ class _OrbitPainter extends CustomPainter {
         stops: const [0, 1],
       ).createShader(Rect.fromCircle(center: center, radius: radius * 1.7));
     canvas.drawCircle(center, radius * 1.7, bg);
-    for (int i = 0; i < 70; i++) {
-      final x = (math.sin(i * 127.1) * 43758.5).abs() % size.width;
-      final y = (math.sin(i * 71.7 + 2) * 11923.4).abs() % size.height;
+    for (final star in _stars) {
       canvas.drawCircle(
-        Offset(x, y),
-        i % 9 == 0 ? 1.2 : .65,
-        Paint()..color = Colors.white.withValues(alpha: .12 + (i % 5) * .025),
+        Offset(star.x * size.width, star.y * size.height),
+        star.radius,
+        star.paint,
       );
     }
     for (final r in [inner, outer]) {
@@ -488,20 +507,28 @@ class _OrbitPainter extends CustomPainter {
         center,
         r,
         Paint()
-          ..color = const Color(0xff50dff8).withValues(alpha: .10)
+          ..color = const Color(0xff50dff8).withValues(alpha: .055)
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 8
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8),
+          ..strokeWidth = 7,
       );
       canvas.drawCircle(
         center,
         r,
         Paint()
-          ..color = const Color(0xff5894c8).withValues(alpha: .4)
+          ..color = const Color(0xff75dcf5).withValues(alpha: .64)
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.2,
+          ..strokeWidth = 1.35,
+      );
+      canvas.drawCircle(
+        center,
+        r,
+        Paint()
+          ..color = Colors.white.withValues(alpha: .12)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = .55,
       );
     }
+    _orbitMarkers(canvas, center, inner, outer);
     _planet(canvas, center, radius * .40);
     _orbitalThing(
       canvas,
@@ -511,6 +538,7 @@ class _OrbitPainter extends CustomPainter {
       const Color(0xff60efff),
       8,
       glow: true,
+      trail: true,
     );
     for (final hazard in hazards) {
       _orbitalThing(
@@ -526,13 +554,32 @@ class _OrbitPainter extends CustomPainter {
     _gem(canvas, center, gemLane == 0 ? inner : outer, gemAngle);
   }
 
+  void _orbitMarkers(Canvas canvas, Offset center, double inner, double outer) {
+    final paint = Paint()
+      ..color = const Color(0xff8cecff).withValues(alpha: .35)
+      ..strokeWidth = 1;
+    for (int i = 0; i < 12; i++) {
+      final angle = i * _fullTurn / 12;
+      final startRadius = inner - 2;
+      final endRadius = i % 3 == 0 ? outer + 5 : inner + 2;
+      canvas.drawLine(
+        center +
+            Offset(
+              math.cos(angle) * startRadius,
+              math.sin(angle) * startRadius,
+            ),
+        center +
+            Offset(math.cos(angle) * endRadius, math.sin(angle) * endRadius),
+        paint,
+      );
+    }
+  }
+
   void _planet(Canvas c, Offset center, double r) {
     c.drawCircle(
       center,
       r * 1.25,
-      Paint()
-        ..color = const Color(0xff455cff).withValues(alpha: .18)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 22),
+      Paint()..color = const Color(0xff455cff).withValues(alpha: .11),
     );
     c.drawCircle(
       center,
@@ -552,17 +599,58 @@ class _OrbitPainter extends CustomPainter {
     final clip = Path()..addOval(Rect.fromCircle(center: center, radius: r));
     c.save();
     c.clipPath(clip);
-    for (int i = 0; i < 5; i++) {
-      c.drawOval(
-        Rect.fromCenter(
-          center: center + Offset(-r * .2, (i - 2) * r * .33),
-          width: r * 1.8,
-          height: r * .12,
-        ),
-        Paint()..color = const Color(0xffc398ff).withValues(alpha: .08),
+    for (int i = 0; i < 4; i++) {
+      final y = center.dy + (i - 1.5) * r * .42;
+      final band = Path()
+        ..moveTo(center.dx - r, y)
+        ..quadraticBezierTo(
+          center.dx - r * .15,
+          y - r * .18,
+          center.dx + r,
+          y + r * .04,
+        );
+      c.drawPath(
+        band,
+        Paint()
+          ..color = const Color(0xffd9bdff).withValues(alpha: .13)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = i.isEven ? r * .09 : r * .045,
+      );
+    }
+    // Small, clipped craters add surface detail without blur filters.
+    for (final crater in [
+      Offset(-.34, -.12),
+      Offset(.28, .18),
+      Offset(-.08, .48),
+    ]) {
+      final craterCenter = center + Offset(crater.dx * r, crater.dy * r);
+      c.drawCircle(
+        craterCenter,
+        r * .095,
+        Paint()..color = const Color(0xff17183e).withValues(alpha: .28),
+      );
+      c.drawArc(
+        Rect.fromCircle(center: craterCenter, radius: r * .095),
+        math.pi * 1.1,
+        math.pi * .9,
+        false,
+        Paint()
+          ..color = const Color(0xffe4caff).withValues(alpha: .3)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = .65,
       );
     }
     c.restore();
+    c.drawArc(
+      Rect.fromCircle(center: center, radius: r - .8),
+      math.pi * 1.08,
+      math.pi * .72,
+      false,
+      Paint()
+        ..color = const Color(0xfff0d5ff).withValues(alpha: .48)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5,
+    );
     c.drawCircle(
       center,
       r,
@@ -581,16 +669,40 @@ class _OrbitPainter extends CustomPainter {
     Color color,
     double dot, {
     bool glow = false,
+    bool trail = false,
   }) {
     final p = center + Offset(math.cos(a) * r, math.sin(a) * r);
-    if (glow)
+    if (trail) {
+      for (int i = 3; i >= 1; i--) {
+        final trailAngle = a - i * .055;
+        final trailPoint =
+            center + Offset(math.cos(trailAngle) * r, math.sin(trailAngle) * r);
+        c.drawCircle(
+          trailPoint,
+          dot * (1 - i * .16),
+          Paint()
+            ..color = const Color(0xff60efff)
+                .withValues(alpha: .10 + .06 * (3 - i)),
+        );
+      }
+    }
+    if (glow) {
       c.drawCircle(
         p,
-        dot * 2,
-        Paint()
-          ..color = color.withValues(alpha: .35)
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10),
+        dot * 1.65,
+        Paint()..color = color.withValues(alpha: .16),
       );
+    }
+    if (color == const Color(0xffff445d)) {
+      c.drawCircle(
+        p,
+        dot + 1.5,
+        Paint()
+          ..color = const Color(0xffffb0b8).withValues(alpha: .72)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1,
+      );
+    }
     c.drawCircle(p, dot, Paint()..color = color);
     c.drawCircle(
       p,
@@ -602,12 +714,12 @@ class _OrbitPainter extends CustomPainter {
   void _gem(Canvas c, Offset center, double r, double a) {
     final p = center + Offset(math.cos(a) * r, math.sin(a) * r);
     final color = const Color(0xffffd66e);
+    final pulse = .5 + .5 * math.sin(angle * 5);
+    final glowRadius = 10 + pulse * 2;
     c.drawCircle(
       p,
-      14,
-      Paint()
-        ..color = color.withValues(alpha: .35)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10),
+      glowRadius,
+      Paint()..color = color.withValues(alpha: .12 + pulse * .10),
     );
     final path = Path()
       ..moveTo(p.dx, p.dy - 8)
