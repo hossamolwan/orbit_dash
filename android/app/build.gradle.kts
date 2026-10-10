@@ -1,7 +1,50 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+val releaseSigningPropertiesFile = rootProject.file("key.properties")
+val releaseSigningProperties = Properties()
+if (releaseSigningPropertiesFile.isFile) {
+    releaseSigningPropertiesFile.inputStream().use { input ->
+        releaseSigningProperties.load(input)
+    }
+}
+
+val userProfilePath = System.getenv("USERPROFILE")
+val releaseStoreFile = releaseSigningProperties.getProperty("storeFile")
+    ?.replace("%USERPROFILE%", userProfilePath ?: "%USERPROFILE%")
+    ?.takeIf { it.isNotBlank() && !it.contains("REPLACE_WITH") }
+    ?.let { file(it) }
+val releaseSigningConfigured = listOf(
+    "storeFile",
+    "storePassword",
+    "keyAlias",
+    "keyPassword",
+).all { key ->
+    releaseSigningProperties.getProperty(key)
+        ?.let { it.isNotBlank() && !it.contains("REPLACE_WITH") } == true
+} && releaseStoreFile?.isFile == true
+
+val releaseSigningError =
+    "Release signing is not configured. Set a valid keystore path, alias, " +
+        "store password, and key password in android/key.properties."
+
+tasks.configureEach {
+    if (
+        name == "packageRelease" ||
+        name == "bundleRelease" ||
+        name == "assembleRelease"
+    ) {
+        doFirst {
+            if (!releaseSigningConfigured) {
+                throw GradleException(releaseSigningError)
+            }
+        }
+    }
 }
 
 android {
@@ -29,11 +72,24 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("release") {
+                storeFile = checkNotNull(releaseStoreFile)
+                storePassword = releaseSigningProperties.getProperty("storePassword")
+                keyAlias = releaseSigningProperties.getProperty("keyAlias")
+                keyPassword = releaseSigningProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            if (releaseSigningConfigured) {
+                signingConfig = signingConfigs.getByName("release")
+            } else {
+                signingConfig = null
+            }
         }
     }
 }
