@@ -17,10 +17,22 @@ void main() {
       'assets/${GameAudioManager.menuMusicAsset}',
     );
 
-    expect(
-      [data.getUint8(0), data.getUint8(1), data.getUint8(2)],
-      [0x49, 0x44, 0x33],
-    );
+    final header = List.generate(4, data.getUint8);
+    final hasId3Header =
+        header[0] == 0x49 && header[1] == 0x44 && header[2] == 0x33;
+    final version = (header[1] >> 3) & 0x03;
+    final layer = (header[1] >> 1) & 0x03;
+    final bitrateIndex = (header[2] >> 4) & 0x0f;
+    final sampleRateIndex = (header[2] >> 2) & 0x03;
+    final hasMpegAudioFrameHeader =
+        header[0] == 0xff &&
+        (header[1] & 0xe0) == 0xe0 &&
+        version != 0x01 &&
+        layer != 0 &&
+        bitrateIndex != 0 &&
+        bitrateIndex != 0x0f &&
+        sampleRateIndex != 0x03;
+    expect(hasId3Header || hasMpegAudioFrameHeader, isTrue);
     expect(data.lengthInBytes, greaterThan(1000000));
   });
 
@@ -217,6 +229,29 @@ void main() {
       tester.getRect(find.text('RESTART RUN')).bottom,
       lessThanOrEqualTo(568),
     );
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('live score sits above the orbit on a compact viewport', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(320, 568);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(_testApp());
+    await tester.tap(find.text('START RUN'));
+    await tester.pump();
+
+    final scoreRect = tester.getRect(find.byKey(const ValueKey('score')));
+    final orbitRect = tester.getRect(
+      find.byKey(const ValueKey('orbit-lane-0')),
+    );
+    expect(find.text('SCORE'), findsOneWidget);
+    expect(scoreRect.top, greaterThanOrEqualTo(0));
+    expect(scoreRect.bottom, lessThanOrEqualTo(orbitRect.top));
+    expect(scoreRect.bottom, lessThanOrEqualTo(568));
     await tester.pumpWidget(const SizedBox.shrink());
   });
 

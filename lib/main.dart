@@ -319,50 +319,47 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                       SizedBox(
                         width: side,
                         height: side,
-                        child: Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            CustomPaint(
-                              key: ValueKey('orbit-lane-$_lane'),
-                              size: Size.square(side),
-                              painter: _OrbitPainter(
-                                angle: _angle,
-                                lane: _lane,
-                                hazards: List.of(_hazards),
-                                gemAngle: _gemAngle,
-                                gemLane: _gemLane,
-                              ),
-                            ),
-                            if (_state == RunState.playing)
-                              Positioned(
-                                top: 22,
-                                child: Column(
-                                  children: [
-                                    const Text(
-                                      'SCORE',
-                                      style: TextStyle(
-                                        color: Colors.white54,
-                                        letterSpacing: 2.5,
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                    Text(
-                                      '$_score',
-                                      key: const ValueKey('score'),
-                                      style: const TextStyle(
-                                        fontSize: 48,
-                                        fontWeight: FontWeight.w300,
-                                        color: Colors.white,
-                                        height: 1.12,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                          ],
+                        child: CustomPaint(
+                          key: ValueKey('orbit-lane-$_lane'),
+                          size: Size.square(side),
+                          painter: _OrbitPainter(
+                            angle: _angle,
+                            lane: _lane,
+                            hazards: List.of(_hazards),
+                            gemAngle: _gemAngle,
+                            gemLane: _gemLane,
+                          ),
                         ),
                       ),
+                      if (_state == RunState.playing)
+                        Positioned(
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          child: Column(
+                            children: [
+                              const Text(
+                                'SCORE',
+                                style: TextStyle(
+                                  color: Colors.white54,
+                                  letterSpacing: 2.5,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              Text(
+                                '$_score',
+                                key: const ValueKey('score'),
+                                style: const TextStyle(
+                                  fontSize: 48,
+                                  fontWeight: FontWeight.w300,
+                                  color: Colors.white,
+                                  height: 1.12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       if (_state != RunState.playing) _overlay(),
                     ],
                   ),
