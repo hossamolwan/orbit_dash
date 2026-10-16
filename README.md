@@ -1,101 +1,92 @@
-# Orbit Dash 🚀
+# Orbit Dash
 
-**A fast-paced space arcade game built with Flutter.**
+Orbit Dash is a space arcade game built with Flutter. Move between orbital lanes, avoid asteroids, collect gems, and try to reach each stage's score target.
 
-Switch between orbital lanes, dodge incoming hazards, collect gems, and push your high score higher in this minimalist cosmic arcade experience.
+## About the Game
 
-## 🎮 About the Game
+Each run takes place around a set of circular orbits. Choose a lane to move your ship, collect gems for points, and avoid incoming hazards. Progress through five stages, each with its own score target and number of orbits.
 
-Orbit Dash is a space-themed arcade game focused on quick reactions, precise timing, and surviving as long as possible.
+## Features
 
-Navigate around the orbit, avoid dangerous obstacles, collect gems, and challenge yourself to beat your personal best.
+- Two to five orbits, depending on the selected stage.
+- Select an orbit directly by tapping the play area.
+- Dodge asteroids and collect gems while playing.
+- Track the current score and save your best score locally.
+- Five stages with different score targets; later stages unlock as you complete stages, and unlocked progress is saved locally.
+- A temporary shield that absorbs one collision and lasts up to five seconds.
+- Five locally saved achievements: First Steps, Gem Collector, Saved by the Shield, Orbit Explorer, and Orbital Master.
+- Background music and separate sound effects, with independent controls whose settings are saved locally.
+- Pause and resume gameplay; the game pauses when the app moves to the background.
+- Responsive layouts for different screen sizes.
 
-## ✨ Features
+## Stages
 
-- **Orbit Switching:** Tap the play area to switch between orbital lanes.
-- **Hazard Avoidance:** Dodge obstacles and survive as long as possible.
-- **Gem Collection:** Collect gems during your run.
-- **Score Tracking:** Earn points and save your best score locally.
-- **Pause & Resume:** Pause the game and continue when you're ready.
-- **Audio:** Background music and gameplay sound effects, with separate audio controls.
-- **Responsive UI:** Game screens designed to adapt to different screen sizes.
-- **Custom Visuals:** A minimalist space aesthetic with glowing orbital elements.
+| Stage | Name | Target score | Orbits |
+| --- | --- | ---: | ---: |
+| 1 | First Orbit | 10 points | 2 |
+| 2 | Gem Hunter | 15 points | 3 |
+| 3 | Asteroid Rush | 25 points | 4 |
+| 4 | Cosmic Trial | 35 points | 5 |
+| 5 | Orbital Master | 50 points | 5 |
 
-## 🛠️ Built With
+Completing a stage unlocks the next stage. Previously unlocked stages remain available in the stage picker.
 
-- [Flutter](https://flutter.dev/) — UI and cross-platform app framework
-- [Dart](https://dart.dev/) — Programming language
-- [shared_preferences](https://pub.dev/packages/shared_preferences) — Local best-score and preference storage
-- [audioplayers](https://pub.dev/packages/audioplayers) — Music and sound effects
+## Achievements
 
-## 🚀 Getting Started
+Achievements are saved on the device and can be viewed in the game:
 
-### Prerequisites
+| Achievement | Unlock condition |
+| --- | --- |
+| First Steps | Collect 10 gems in total. |
+| Gem Collector | Collect 50 gems in total. |
+| Saved by the Shield | Absorb an asteroid collision with the shield. |
+| Orbit Explorer | Unlock Stage 4 by completing Stage 3. |
+| Orbital Master | Complete Stage 5 successfully. |
 
-- Flutter SDK
-- Dart SDK compatible with the project
-- Android Studio or another configured Flutter development environment
+## Built With
 
-### Run Locally
+- [Flutter](https://flutter.dev/) for the app UI and game rendering.
+- [Dart](https://dart.dev/) for the game and application code.
+- [shared_preferences](https://pub.dev/packages/shared_preferences) for local scores, stage progress, achievements, and audio settings.
+- [audioplayers](https://pub.dev/packages/audioplayers) for background music and sound effects.
 
-1. Clone the repository:
+## Getting Started
 
-   ```bash
-   git clone <YOUR_GITHUB_REPOSITORY_URL>
-   ```
+### Requirements
 
-2. Navigate to the project directory:
+- Flutter SDK installed and available on your `PATH`.
+- A Dart SDK compatible with the constraint in `pubspec.yaml` (provided with Flutter).
+- A configured target device or emulator. Android Studio can be used to set up an Android emulator.
 
-   ```bash
-   cd orbit_dash
-   ```
+### Run the game
 
-3. Install dependencies:
+From the project directory, fetch dependencies and launch the app on a connected device or emulator:
 
-   ```bash
-   flutter pub get
-   ```
+```bash
+flutter pub get
+flutter run
+```
 
-4. Run the game on a connected device or emulator:
+## Testing
 
-   ```bash
-   flutter run
-   ```
-
-## 🧪 Run Tests
-
-Run the automated test suite:
+Run the automated tests and static analysis from the project directory:
 
 ```bash
 flutter test
-```
-
-Check the project for static analysis issues:
-
-```bash
 flutter analyze
 ```
 
-## 🎯 How to Play
+## How to Play
 
-1. Start a new run.
-2. Tap the game area to switch orbital lanes.
-3. Avoid hazards and collect gems.
-4. Survive longer and aim for a new high score.
+1. Start a stage. The stage picker lets you choose any stage you have unlocked.
+2. Tap the play area at the orbit you want to move to; the ship moves directly to that orbit.
+3. Collect gems by reaching them. Gems add to your score and your lifetime gem total.
+4. Avoid asteroids. A collision ends the run unless your temporary shield is active.
+5. Collect the shield pickup to activate protection. It absorbs one collision, then is consumed; its protection lasts up to five seconds.
+6. Reach the stage's target score to complete it and unlock the next stage. Use the pause control to pause, then resume when ready.
 
-## 📁 Project Structure
+## Project Status
 
-```text
-lib/          Application and gameplay code
-assets/audio/ Music and sound effects
-test/         Automated tests
-tool/         Development utilities
-```
+Current version: **1.2.0+3**
 
-## 📌 Project Status
-
-Orbit Dash is an actively developed Flutter game. Gameplay, audio, responsive layouts, and Android device testing are part of the current development work.
-
-## 📄 License
-
-No open-source license has been specified yet. All rights remain with the respective copyright holders unless a license is added to this repository.
+Orbit Dash is an actively developed Flutter game. This version includes five playable stages, local progress and achievement saving, audio controls, and pause/resume support.
