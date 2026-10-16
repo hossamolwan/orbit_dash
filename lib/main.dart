@@ -9,11 +9,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() => runApp(const OrbitDashApp());
 
 class OrbitDashApp extends StatelessWidget {
-  const OrbitDashApp({super.key, this.audioController, this.orbitCount = 2})
-    : assert(orbitCount >= 2 && orbitCount <= 5);
+  const OrbitDashApp({super.key, this.audioController});
 
   final GameAudioController? audioController;
-  final int orbitCount;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -23,14 +21,107 @@ class OrbitDashApp extends StatelessWidget {
       scaffoldBackgroundColor: const Color(0xff070b18),
       colorScheme: const ColorScheme.dark(primary: Color(0xff55e7ff)),
     ),
-    home: OrbitGamePage(
-      audioController: audioController,
-      orbitCount: orbitCount,
-    ),
+    home: OrbitGamePage(audioController: audioController),
   );
 }
 
-enum RunState { ready, playing, paused, over }
+enum RunState {
+  ready,
+  selectingStage,
+  playing,
+  paused,
+  over,
+  stageComplete,
+  gameComplete,
+}
+
+class StageDefinition {
+  const StageDefinition({
+    required this.number,
+    required this.name,
+    required this.targetScore,
+    required this.orbitCount,
+  });
+
+  final int number;
+  final String name;
+  final int targetScore;
+  final int orbitCount;
+}
+
+const List<StageDefinition> orbitStages = [
+  StageDefinition(
+    number: 1,
+    name: 'First Orbit',
+    targetScore: 10,
+    orbitCount: 2,
+  ),
+  StageDefinition(
+    number: 2,
+    name: 'Gem Hunter',
+    targetScore: 15,
+    orbitCount: 3,
+  ),
+  StageDefinition(
+    number: 3,
+    name: 'Asteroid Rush',
+    targetScore: 25,
+    orbitCount: 4,
+  ),
+  StageDefinition(
+    number: 4,
+    name: 'Cosmic Trial',
+    targetScore: 35,
+    orbitCount: 5,
+  ),
+  StageDefinition(
+    number: 5,
+    name: 'Orbital Master',
+    targetScore: 50,
+    orbitCount: 5,
+  ),
+];
+
+class StageCompletionGate {
+  bool _completed = false;
+
+  bool completeIfReached(int score, StageDefinition stage) {
+    if (_completed || score < stage.targetScore) return false;
+    _completed = true;
+    return true;
+  }
+
+  void reset() => _completed = false;
+}
+
+class StageProgressStore {
+  static const preferenceKey = 'orbit_dash_unlocked_stage';
+
+  Future<int> loadUnlockedStage() async {
+    final preferences = await SharedPreferences.getInstance();
+    return _storedStage(preferences);
+  }
+
+  Future<void> unlockThrough(int stageNumber) async {
+    final preferences = await SharedPreferences.getInstance();
+    final current = _storedStage(preferences);
+    final requested = _validStage(stageNumber);
+    if (requested > current) {
+      await preferences.setInt(preferenceKey, requested);
+    }
+  }
+
+  int _validStage(int? value) =>
+      value == null || value < 1 || value > orbitStages.length ? 1 : value;
+
+  int _storedStage(SharedPreferences preferences) {
+    try {
+      return _validStage(preferences.getInt(preferenceKey));
+    } on TypeError {
+      return 1;
+    }
+  }
+}
 
 const double _fullTurn = math.pi * 2;
 
@@ -142,11 +233,14 @@ double hazardSpawnIntervalForScore(int score) =>
     math.max(0.85, 2.0 - score * 0.025);
 
 class OrbitGamePage extends StatefulWidget {
-  const OrbitGamePage({super.key, this.audioController, this.orbitCount = 2})
-    : assert(orbitCount >= 2 && orbitCount <= 5);
+  const OrbitGamePage({
+    super.key,
+    this.audioController,
+    this.stages = orbitStages,
+  }) : assert(stages.length >= 1 && stages.length <= 5);
 
   final GameAudioController? audioController;
-  final int orbitCount;
+  final List<StageDefinition> stages;
 
   @override
   State<OrbitGamePage> createState() => _OrbitGamePageState();
@@ -161,12 +255,21 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   RunState _state = RunState.ready;
   int _score = 0;
   int _best = 0;
+  int _currentStageIndex = 0;
+  int _highestUnlockedStage = 1;
+  bool _stageProgressLoaded = false;
+  final StageProgressStore _stageProgressStore = StageProgressStore();
+  Future<void> _progressWrite = Future<void>.value();
+  final StageCompletionGate _completionGate = StageCompletionGate();
+  bool _completionHandled = false;
   int _lane = 0;
   double _angle = -math.pi / 2;
   double _gemAngle = 0.7;
   int _gemLane = 1;
   final List<_Hazard> _hazards = [];
   double _spawnClock = 0;
+
+  StageDefinition get _currentStage => widget.stages[_currentStageIndex];
 
   @override
   void initState() {
@@ -180,8 +283,20 @@ class _OrbitGamePageState extends State<OrbitGamePage>
       }),
     );
     _ticker = createTicker(_tick);
+    unawaited(_loadStageProgress());
     SharedPreferences.getInstance().then((prefs) {
       if (mounted) setState(() => _best = prefs.getInt('orbit_dash_best') ?? 0);
+    });
+  }
+
+  Future<void> _loadStageProgress() async {
+    final loadedStage = await _stageProgressStore.loadUnlockedStage();
+    if (!mounted) return;
+    setState(() {
+      _highestUnlockedStage = math
+          .max(_highestUnlockedStage, loadedStage)
+          .toInt();
+      _stageProgressLoaded = true;
     });
   }
 
@@ -214,7 +329,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
         _hazards.add(
           _Hazard(
             (_angle + math.pi + 0.4) % (math.pi * 2),
-            hazardLaneForScore(_score, _lane, widget.orbitCount),
+            hazardLaneForScore(_score, _lane, _currentStage.orbitCount),
           ),
         );
       }
@@ -241,20 +356,33 @@ class _OrbitGamePageState extends State<OrbitGamePage>
         _score++;
         _audio.playEffect(GameSoundEffect.gemCollect);
         _gemAngle = (_angle + 2.4 + (_score % 3) * 0.45) % (math.pi * 2);
-        _gemLane = nextOrbitLane(_gemLane, widget.orbitCount);
+        _gemLane = nextOrbitLane(_gemLane, _currentStage.orbitCount);
+        if (_completionGate.completeIfReached(_score, _currentStage)) {
+          _completeStage();
+          return;
+        }
       }
     });
   }
 
-  void _start() {
+  void _start({int? stageIndex}) {
+    final requestedStage = stageIndex ?? _currentStageIndex;
+    if (requestedStage < 0 ||
+        requestedStage >= widget.stages.length ||
+        requestedStage + 1 > _highestUnlockedStage) {
+      return;
+    }
     setState(() {
+      _currentStageIndex = requestedStage;
       _score = 0;
       _lane = 0;
       _angle = -math.pi / 2;
       _spawnClock = 0;
       _hazards.clear();
       _gemAngle = 0.7;
-      _gemLane = nextOrbitLane(0, widget.orbitCount);
+      _gemLane = nextOrbitLane(0, _currentStage.orbitCount);
+      _completionGate.reset();
+      _completionHandled = false;
       _state = RunState.playing;
       _lastTick = Duration.zero;
     });
@@ -264,16 +392,68 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   }
 
   void _finish() {
+    if (_state != RunState.playing) return;
     _state = RunState.over;
     _ticker.stop();
     _audio.setGameState(AudioRunState.over);
     _audio.playEffect(GameSoundEffect.collision);
-    if (_score > _best) {
-      _best = _score;
+    _saveBestScore();
+  }
+
+  void _completeStage() {
+    if (_state != RunState.playing || _completionHandled) return;
+    _completionHandled = true;
+    _state = _currentStageIndex == widget.stages.length - 1
+        ? RunState.gameComplete
+        : RunState.stageComplete;
+    _ticker.stop();
+    _audio.setGameState(AudioRunState.over);
+    _saveBestScore();
+    final nextStage = _currentStageIndex + 1 < widget.stages.length
+        ? widget.stages[_currentStageIndex + 1].number
+        : null;
+    if (nextStage != null && nextStage > _highestUnlockedStage) {
+      _highestUnlockedStage = nextStage;
+      _progressWrite = _progressWrite.then(
+        (_) => _stageProgressStore.unlockThrough(_highestUnlockedStage),
+      );
+      _progressWrite = _progressWrite.catchError((Object error) {
+        debugPrint('Failed to save stage progress: $error');
+      });
+      unawaited(_progressWrite);
+    }
+  }
+
+  void _saveBestScore() {
+    if (_score <= _best) return;
+    _best = _score;
+    unawaited(
       SharedPreferences.getInstance().then(
         (prefs) => prefs.setInt('orbit_dash_best', _best),
-      );
+      ),
+    );
+  }
+
+  Future<void> _continueToNextStage() async {
+    if (_state != RunState.stageComplete ||
+        _currentStageIndex >= widget.stages.length - 1) {
+      return;
     }
+    await _progressWrite;
+    if (!mounted) return;
+    _start(stageIndex: _currentStageIndex + 1);
+  }
+
+  Future<void> _selectStage(int stageIndex) async {
+    if (stageIndex < 0 ||
+        stageIndex >= widget.stages.length ||
+        stageIndex + 1 > _highestUnlockedStage ||
+        (!_stageProgressLoaded && stageIndex > 0)) {
+      return;
+    }
+    await _progressWrite;
+    if (!mounted) return;
+    _start(stageIndex: stageIndex);
   }
 
   void _pause({bool playEffect = true}) {
@@ -300,6 +480,11 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     _audio.setGameState(AudioRunState.menu);
   }
 
+  void _openStageSelection() {
+    setState(() => _state = RunState.selectingStage);
+    _audio.setGameState(AudioRunState.menu);
+  }
+
   void _tapGame(Offset globalPosition) {
     if (_state == RunState.playing) {
       final canvas =
@@ -308,7 +493,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
         _lane,
         OrbitGeometry.forSizeAndCount(
           canvas.size,
-          orbitCount: widget.orbitCount,
+          orbitCount: _currentStage.orbitCount,
         ),
         canvas.globalToLocal(globalPosition),
       );
@@ -320,10 +505,12 @@ class _OrbitGamePageState extends State<OrbitGamePage>
 
   AudioRunState _audioStateFor(RunState state) => switch (state) {
     // The ready overlay is the app's actual start/menu screen.
-    RunState.ready => AudioRunState.menu,
+    RunState.ready || RunState.selectingStage => AudioRunState.menu,
     RunState.playing => AudioRunState.playing,
     RunState.paused => AudioRunState.paused,
-    RunState.over => AudioRunState.over,
+    RunState.over ||
+    RunState.stageComplete ||
+    RunState.gameComplete => AudioRunState.over,
   };
 
   void _toggleMusic() {
@@ -444,7 +631,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                           painter: _OrbitPainter(
                             angle: _angle,
                             lane: _lane,
-                            orbitCount: widget.orbitCount,
+                            orbitCount: _currentStage.orbitCount,
                             hazards: List.of(_hazards),
                             gemAngle: _gemAngle,
                             gemLane: _gemLane,
@@ -460,12 +647,13 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Text(
-                                  'SCORE',
-                                  style: TextStyle(
+                                Text(
+                                  'STAGE ${_currentStage.number} · $_score/${_currentStage.targetScore}',
+                                  key: const ValueKey('current-stage'),
+                                  style: const TextStyle(
                                     color: Colors.white54,
-                                    letterSpacing: 2.5,
-                                    fontSize: 11,
+                                    letterSpacing: 1.2,
+                                    fontSize: 10,
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
@@ -600,17 +788,37 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     required bool compact,
     required bool showAudioControls,
   }) {
+    if (_state == RunState.selectingStage) {
+      return _stageSelectionContent(
+        compact: compact,
+        showAudioControls: showAudioControls,
+      );
+    }
+
+    final stage = _currentStage;
+    final lost = _state == RunState.over;
+    final stageComplete = _state == RunState.stageComplete;
+    final gameComplete = _state == RunState.gameComplete;
+    final completed = stageComplete || gameComplete;
     final spacing = compact ? 10.0 : 14.0;
     final title = ready
         ? 'READY, PILOT?'
         : paused
         ? 'PAUSED'
-        : 'GAME OVER';
+        : lost
+        ? 'STAGE FAILED'
+        : stageComplete
+        ? 'STAGE COMPLETE'
+        : 'GAME COMPLETE';
     final subtitle = ready
         ? 'Dodge the red. Chase the glow.'
         : paused
         ? 'Your orbit is on hold.'
-        : 'You collected $_score ${_score == 1 ? 'shard' : 'shards'}.';
+        : lost
+        ? 'You collected $_score ${_score == 1 ? 'shard' : 'shards'}.'
+        : stageComplete
+        ? '${stage.name} complete. Next: ${widget.stages[_currentStageIndex + 1].name}.'
+        : 'You mastered all five stages.';
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -620,8 +828,12 @@ class _OrbitGamePageState extends State<OrbitGamePage>
               ? Icons.auto_awesome_rounded
               : paused
               ? Icons.pause_circle_outline_rounded
+              : completed
+              ? Icons.emoji_events_rounded
               : Icons.sports_score_rounded,
-          color: paused
+          color: completed
+              ? const Color(0xffffd66e)
+              : paused
               ? const Color(0xff65eaff)
               : ready
               ? const Color(0xff52e5ff)
@@ -651,17 +863,43 @@ class _OrbitGamePageState extends State<OrbitGamePage>
         ),
         if (ready) ...[
           SizedBox(height: spacing),
+          Text(
+            'STAGE ${stage.number} · ${stage.name.toUpperCase()}',
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Color(0xffd2deef),
+              fontSize: 10,
+              letterSpacing: 1,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'TARGET ${stage.targetScore}  ·  ${stage.orbitCount} ORBITS',
+            style: const TextStyle(
+              color: Color(0xff8c9bb5),
+              fontSize: 10,
+              letterSpacing: 1.2,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          SizedBox(height: compact ? 6 : 8),
           _resultCard(label: 'BEST FLIGHT', value: '$_best'),
         ],
         if (paused) ...[
           SizedBox(height: spacing),
           _resultCard(label: 'CURRENT SCORE', value: '$_score'),
+          const SizedBox(height: 6),
+          Text(
+            'STAGE ${stage.number} · ${stage.name}',
+            style: const TextStyle(color: Color(0xff8c9bb5), fontSize: 10),
+          ),
         ],
-        if (!ready && !paused) ...[
+        if (lost || completed) ...[
           SizedBox(height: compact ? 8 : 12),
-          const Text(
-            'FINAL SCORE',
-            style: TextStyle(
+          Text(
+            lost ? 'FINAL SCORE' : 'STAGE SCORE',
+            style: const TextStyle(
               color: Color(0xff8c9bb5),
               fontSize: 10,
               letterSpacing: 2,
@@ -677,132 +915,278 @@ class _OrbitGamePageState extends State<OrbitGamePage>
               fontWeight: FontWeight.w300,
             ),
           ),
+          if (stageComplete)
+            Text(
+              'NEXT STAGE UNLOCKED',
+              style: const TextStyle(
+                color: Color(0xff65eaff),
+                fontSize: 10,
+                letterSpacing: 1.4,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
           SizedBox(height: compact ? 6 : 10),
           _resultCard(label: 'BEST FLIGHT', value: '$_best'),
         ],
         if (showAudioControls) ...[
           SizedBox(height: compact ? 8 : 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              IconButton(
-                onPressed: _toggleMusic,
-                tooltip: _audio.musicEnabled ? 'Music on' : 'Music off',
-                visualDensity: VisualDensity.compact,
-                icon: Icon(
-                  _audio.musicEnabled
-                      ? Icons.music_note_rounded
-                      : Icons.music_off_rounded,
-                  color: _audio.musicEnabled
-                      ? const Color(0xff65eaff)
-                      : Colors.white38,
-                ),
-              ),
-              IconButton(
-                onPressed: _toggleEffects,
-                tooltip: _audio.effectsEnabled
-                    ? 'Sound effects on'
-                    : 'Sound effects off',
-                visualDensity: VisualDensity.compact,
-                icon: Icon(
-                  _audio.effectsEnabled
-                      ? Icons.volume_up_rounded
-                      : Icons.volume_off_rounded,
-                  color: _audio.effectsEnabled
-                      ? const Color(0xff65eaff)
-                      : Colors.white38,
-                ),
-              ),
-            ],
+          _audioSettingsRow(),
+        ],
+        SizedBox(height: compact ? 12 : 18),
+        _primaryButton(
+          label: ready
+              ? 'START RUN'
+              : paused
+              ? 'RESUME'
+              : lost
+              ? 'RETRY STAGE'
+              : stageComplete
+              ? 'CONTINUE TO STAGE ${stage.number + 1}'
+              : 'PLAY AGAIN',
+          onPressed: ready
+              ? _start
+              : paused
+              ? _resume
+              : lost
+              ? _start
+              : stageComplete
+              ? () => unawaited(_continueToNextStage())
+              : () => _start(stageIndex: 0),
+        ),
+        if (ready || paused || lost || completed) ...[
+          const SizedBox(height: 8),
+          _secondaryButton(
+            label: ready
+                ? 'SELECT STAGE'
+                : paused
+                ? 'RESTART STAGE'
+                : 'MAIN MENU',
+            icon: ready
+                ? Icons.view_carousel_rounded
+                : paused
+                ? Icons.replay_rounded
+                : Icons.home_rounded,
+            onPressed: ready
+                ? _openStageSelection
+                : paused
+                ? _start
+                : _returnToMenu,
           ),
         ],
-        SizedBox(height: compact ? 14 : 20),
-        SizedBox(
-          width: double.infinity,
-          height: 56,
-          child: FilledButton.icon(
-            onPressed: paused ? _resume : _start,
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xff54e6ff),
-              foregroundColor: const Color(0xff06101d),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-            ),
-            icon: Icon(
-              paused ? Icons.play_arrow_rounded : Icons.play_arrow_rounded,
-              size: 23,
-            ),
-            label: Text(
-              ready
-                  ? 'START RUN'
-                  : paused
-                  ? 'RESUME'
-                  : 'PLAY AGAIN',
-              style: const TextStyle(
-                letterSpacing: 1.6,
-                fontWeight: FontWeight.w900,
-                fontSize: 13,
-              ),
-            ),
-          ),
-        ),
         if (paused) ...[
           const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            height: 48,
-            child: OutlinedButton.icon(
-              onPressed: _start,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xffc3d0e6),
-                side: const BorderSide(color: Color(0x557d8ba5)),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(15),
-                ),
-              ),
-              icon: const Icon(Icons.replay_rounded, size: 19),
-              label: const Text(
-                'RESTART RUN',
-                style: TextStyle(
-                  letterSpacing: 1.3,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 11,
-                ),
-              ),
-            ),
-          ),
-        ],
-        if (!ready && !paused) ...[
-          const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            height: 48,
-            child: OutlinedButton.icon(
-              onPressed: _returnToMenu,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xffc3d0e6),
-                side: const BorderSide(color: Color(0x557d8ba5)),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(15),
-                ),
-              ),
-              icon: const Icon(Icons.home_rounded, size: 19),
-              label: const Text(
-                'MAIN MENU',
-                style: TextStyle(
-                  letterSpacing: 1.3,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 11,
-                ),
-              ),
-            ),
+          _secondaryButton(
+            label: 'MAIN MENU',
+            icon: Icons.home_rounded,
+            onPressed: _returnToMenu,
           ),
         ],
       ],
     );
   }
 
+  Widget _stageSelectionContent({
+    required bool compact,
+    required bool showAudioControls,
+  }) => Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(
+        Icons.view_carousel_rounded,
+        color: const Color(0xff65eaff),
+        size: compact ? 30 : 36,
+      ),
+      SizedBox(height: compact ? 8 : 12),
+      Text(
+        'SELECT STAGE',
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: compact ? 16 : 18,
+          letterSpacing: 2.2,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+      const SizedBox(height: 6),
+      const Text(
+        'Choose any stage you have unlocked.',
+        textAlign: TextAlign.center,
+        style: TextStyle(color: Color(0xffaebbd2), fontSize: 12),
+      ),
+      SizedBox(height: compact ? 10 : 14),
+      for (final stage in widget.stages) _stageOption(stage, compact: compact),
+      if (showAudioControls) ...[
+        SizedBox(height: compact ? 6 : 10),
+        _audioSettingsRow(),
+      ],
+      SizedBox(height: compact ? 8 : 12),
+      _secondaryButton(
+        label: 'MAIN MENU',
+        icon: Icons.home_rounded,
+        onPressed: _returnToMenu,
+      ),
+    ],
+  );
+
+  Widget _stageOption(StageDefinition stage, {required bool compact}) {
+    final open = stage.number <= _highestUnlockedStage;
+    final enabled = open && (_stageProgressLoaded || stage.number == 1);
+    final buttonHeight = compact ? 54.0 : 60.0;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: SizedBox(
+        width: double.infinity,
+        height: buttonHeight,
+        child: OutlinedButton(
+          key: ValueKey('stage-option-${stage.number}'),
+          onPressed: enabled
+              ? () => unawaited(_selectStage(stage.number - 1))
+              : null,
+          style: OutlinedButton.styleFrom(
+            alignment: Alignment.centerLeft,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            foregroundColor: Colors.white,
+            disabledForegroundColor: Colors.white38,
+            side: BorderSide(
+              color: open ? const Color(0x6670e9ff) : const Color(0x337d8ba5),
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                open ? Icons.play_circle_outline_rounded : Icons.lock_outline,
+                color: open ? const Color(0xff65eaff) : Colors.white38,
+                size: 20,
+              ),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${stage.number}. ${stage.name}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    Text(
+                      '${stage.targetScore} points · ${stage.orbitCount} orbits',
+                      style: const TextStyle(
+                        color: Color(0xff9baac3),
+                        fontSize: 10,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 5),
+              Text(
+                open ? 'OPEN' : 'LOCKED',
+                style: TextStyle(
+                  color: open ? const Color(0xff65eaff) : Colors.white38,
+                  fontSize: 9,
+                  letterSpacing: .8,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _audioSettingsRow() => Row(
+    mainAxisAlignment: MainAxisAlignment.center,
+    children: [
+      IconButton(
+        onPressed: _toggleMusic,
+        tooltip: _audio.musicEnabled ? 'Music on' : 'Music off',
+        visualDensity: VisualDensity.compact,
+        icon: Icon(
+          _audio.musicEnabled
+              ? Icons.music_note_rounded
+              : Icons.music_off_rounded,
+          color: _audio.musicEnabled ? const Color(0xff65eaff) : Colors.white38,
+        ),
+      ),
+      IconButton(
+        onPressed: _toggleEffects,
+        tooltip: _audio.effectsEnabled
+            ? 'Sound effects on'
+            : 'Sound effects off',
+        visualDensity: VisualDensity.compact,
+        icon: Icon(
+          _audio.effectsEnabled
+              ? Icons.volume_up_rounded
+              : Icons.volume_off_rounded,
+          color: _audio.effectsEnabled
+              ? const Color(0xff65eaff)
+              : Colors.white38,
+        ),
+      ),
+    ],
+  );
+
+  Widget _primaryButton({
+    required String label,
+    required VoidCallback onPressed,
+  }) => SizedBox(
+    width: double.infinity,
+    height: 56,
+    child: FilledButton.icon(
+      onPressed: onPressed,
+      style: FilledButton.styleFrom(
+        backgroundColor: const Color(0xff54e6ff),
+        foregroundColor: const Color(0xff06101d),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      ),
+      icon: const Icon(Icons.play_arrow_rounded, size: 23),
+      label: Text(
+        label,
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          letterSpacing: 1.3,
+          fontWeight: FontWeight.w900,
+          fontSize: 12,
+        ),
+      ),
+    ),
+  );
+
+  Widget _secondaryButton({
+    required String label,
+    required IconData icon,
+    required VoidCallback onPressed,
+  }) => SizedBox(
+    width: double.infinity,
+    height: 48,
+    child: OutlinedButton.icon(
+      onPressed: onPressed,
+      style: OutlinedButton.styleFrom(
+        foregroundColor: const Color(0xffc3d0e6),
+        side: const BorderSide(color: Color(0x557d8ba5)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+      ),
+      icon: Icon(icon, size: 19),
+      label: Text(
+        label,
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          letterSpacing: 1.1,
+          fontWeight: FontWeight.w800,
+          fontSize: 10,
+        ),
+      ),
+    ),
+  );
   Widget _resultCard({required String label, required String value}) =>
       Container(
         width: double.infinity,

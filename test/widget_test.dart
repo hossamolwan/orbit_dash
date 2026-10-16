@@ -155,7 +155,7 @@ void main() {
     expect(find.text('0'), findsOneWidget);
     expect(find.byKey(const ValueKey('score')), findsNothing);
     expect(find.text('RESUME'), findsOneWidget);
-    expect(find.text('RESTART RUN'), findsOneWidget);
+    expect(find.text('RESTART STAGE'), findsOneWidget);
 
     await tester.tap(find.text('RESUME'));
     await tester.pump();
@@ -164,7 +164,7 @@ void main() {
 
     await tester.tap(find.byTooltip('Pause'));
     await tester.pump();
-    await tester.tap(find.text('RESTART RUN'));
+    await tester.tap(find.text('RESTART STAGE'));
     await tester.pump();
     expect(find.text('PAUSED'), findsNothing);
     expect(find.byTooltip('Pause'), findsOneWidget);
@@ -174,26 +174,30 @@ void main() {
   testWidgets('shows the final score and best result, then replays', (
     tester,
   ) async {
+    SharedPreferences.setMockInitialValues({
+      'orbit_dash_best': 12,
+      StageProgressStore.preferenceKey: 3,
+    });
     await tester.pumpWidget(_testApp());
     await tester.tap(find.text('START RUN'));
     await tester.pump();
 
     for (var frame = 0; frame < 220; frame++) {
       await tester.pump(const Duration(milliseconds: 50));
-      if (find.text('GAME OVER').evaluate().isNotEmpty) break;
+      if (find.text('STAGE FAILED').evaluate().isNotEmpty) break;
     }
 
-    expect(find.text('GAME OVER'), findsOneWidget);
+    expect(find.text('STAGE FAILED'), findsOneWidget);
     expect(find.text('FINAL SCORE'), findsOneWidget);
     expect(find.text('BEST FLIGHT'), findsOneWidget);
     expect(find.text('0'), findsOneWidget);
     expect(find.text('12'), findsOneWidget);
-    expect(find.text('PLAY AGAIN'), findsOneWidget);
+    expect(find.text('RETRY STAGE'), findsOneWidget);
     expect(find.byKey(const ValueKey('score')), findsNothing);
 
-    await tester.tap(find.text('PLAY AGAIN'));
+    await tester.tap(find.text('RETRY STAGE'));
     await tester.pump();
-    expect(find.text('GAME OVER'), findsNothing);
+    expect(find.text('STAGE FAILED'), findsNothing);
     expect(find.byTooltip('Pause'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -232,7 +236,7 @@ void main() {
     );
     expect(tester.getRect(find.text('RESUME')).bottom, lessThanOrEqualTo(568));
     expect(
-      tester.getRect(find.text('RESTART RUN')).bottom,
+      tester.getRect(find.text('RESTART STAGE')).bottom,
       lessThanOrEqualTo(568),
     );
     await tester.pumpWidget(const SizedBox.shrink());
@@ -254,7 +258,7 @@ void main() {
     final orbitRect = tester.getRect(
       find.byKey(const ValueKey('orbit-lane-0')),
     );
-    expect(find.text('SCORE'), findsOneWidget);
+    expect(find.textContaining('STAGE 1'), findsOneWidget);
     expect(scoreRect.top, greaterThanOrEqualTo(0));
     expect(scoreRect.bottom, lessThanOrEqualTo(orbitRect.top));
     expect(scoreRect.bottom, lessThanOrEqualTo(568));
@@ -274,10 +278,10 @@ void main() {
     await tester.pump();
     for (var frame = 0; frame < 220; frame++) {
       await tester.pump(const Duration(milliseconds: 50));
-      if (find.text('GAME OVER').evaluate().isNotEmpty) break;
+      if (find.text('STAGE FAILED').evaluate().isNotEmpty) break;
     }
 
-    expect(find.text('GAME OVER'), findsOneWidget);
+    expect(find.text('STAGE FAILED'), findsOneWidget);
     expect(
       tester
           .state<ScrollableState>(find.byType(Scrollable))
@@ -286,9 +290,9 @@ void main() {
       0,
     );
     for (final label in [
-      'GAME OVER',
+      'STAGE FAILED',
       'FINAL SCORE',
-      'PLAY AGAIN',
+      'RETRY STAGE',
       'MAIN MENU',
     ]) {
       final rect = tester.getRect(find.text(label));
@@ -306,6 +310,173 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  test('stage definitions expose the required goals and orbit counts', () {
+    expect(
+      orbitStages
+          .map(
+            (stage) => [
+              stage.number,
+              stage.name,
+              stage.targetScore,
+              stage.orbitCount,
+            ],
+          )
+          .toList(),
+      [
+        [1, 'First Orbit', 10, 2],
+        [2, 'Gem Hunter', 15, 3],
+        [3, 'Asteroid Rush', 25, 4],
+        [4, 'Cosmic Trial', 35, 5],
+        [5, 'Orbital Master', 50, 5],
+      ],
+    );
+  });
+
+  test('stage completion gate fires once and can reset for replay', () {
+    final gate = StageCompletionGate();
+    final firstStage = orbitStages.first;
+    final finalStage = orbitStages.last;
+    expect(gate.completeIfReached(9, firstStage), isFalse);
+    expect(gate.completeIfReached(10, firstStage), isTrue);
+    expect(gate.completeIfReached(11, firstStage), isFalse);
+    gate.reset();
+    expect(gate.completeIfReached(50, finalStage), isTrue);
+    expect(gate.completeIfReached(51, finalStage), isFalse);
+  });
+
+  test('stage progress defaults safely and never moves backward', () async {
+    final store = StageProgressStore();
+    expect(await store.loadUnlockedStage(), 1);
+    await store.unlockThrough(3);
+    expect(await store.loadUnlockedStage(), 3);
+    await store.unlockThrough(2);
+    expect(await store.loadUnlockedStage(), 3);
+
+    SharedPreferences.setMockInitialValues({
+      StageProgressStore.preferenceKey: 99,
+    });
+    expect(await store.loadUnlockedStage(), 1);
+    SharedPreferences.setMockInitialValues({
+      StageProgressStore.preferenceKey: 0,
+    });
+    expect(await store.loadUnlockedStage(), 1);
+    SharedPreferences.setMockInitialValues({
+      StageProgressStore.preferenceKey: 'invalid',
+    });
+    expect(await store.loadUnlockedStage(), 1);
+  });
+
+  testWidgets('stage picker only starts unlocked stages', (tester) async {
+    await tester.pumpWidget(_testApp());
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('SELECT STAGE'));
+    await tester.pumpAndSettle();
+
+    final lockedStage = tester.widget<OutlinedButton>(
+      find.byKey(const ValueKey('stage-option-2')),
+    );
+    expect(lockedStage.onPressed, isNull);
+    await tester.tap(find.byKey(const ValueKey('stage-option-2')));
+    await tester.pump();
+    expect(find.text('SELECT STAGE'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('stage-option-1')));
+    await tester.pump();
+    await tester.pump();
+    expect(find.byTooltip('Pause'), findsOneWidget);
+    expect(find.textContaining('STAGE 1'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets(
+    'collecting target gems unlocks and advances stages exactly once',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      const testStages = [
+        StageDefinition(
+          number: 1,
+          name: 'Test First',
+          targetScore: 1,
+          orbitCount: 2,
+        ),
+        StageDefinition(
+          number: 2,
+          name: 'Test Second',
+          targetScore: 1,
+          orbitCount: 3,
+        ),
+        StageDefinition(
+          number: 3,
+          name: 'Test Third',
+          targetScore: 1,
+          orbitCount: 4,
+        ),
+        StageDefinition(
+          number: 4,
+          name: 'Test Fourth',
+          targetScore: 1,
+          orbitCount: 5,
+        ),
+        StageDefinition(
+          number: 5,
+          name: 'Test Final',
+          targetScore: 1,
+          orbitCount: 5,
+        ),
+      ];
+      final audio = _TestAudioController();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: OrbitGamePage(audioController: audio, stages: testStages),
+        ),
+      );
+      await tester.tap(find.text('START RUN'));
+      await tester.pump();
+      await _tapOrbitLane(tester, 1, 2);
+      for (var frame = 0; frame < 45; frame++) {
+        await tester.pump(const Duration(milliseconds: 50));
+        if (find.text('STAGE COMPLETE').evaluate().isNotEmpty) break;
+      }
+      expect(find.text('STAGE COMPLETE'), findsOneWidget);
+      expect(
+        audio.effects.where((effect) => effect == GameSoundEffect.gemCollect),
+        hasLength(1),
+      );
+      await tester.pump(const Duration(seconds: 2));
+      expect(find.text('STAGE COMPLETE'), findsOneWidget);
+      expect(await StageProgressStore().loadUnlockedStage(), 2);
+
+      for (var stageNumber = 2; stageNumber <= 5; stageNumber++) {
+        await tester.tap(find.text('CONTINUE TO STAGE $stageNumber'));
+        await tester.pump();
+        await tester.pump();
+        expect(find.textContaining('STAGE $stageNumber'), findsOneWidget);
+        final orbitCounts = [2, 3, 4, 5, 5];
+        await _completeTestStage(tester, orbitCounts[stageNumber - 1]);
+        if (stageNumber < 5) {
+          expect(find.text('STAGE COMPLETE'), findsOneWidget);
+          expect(
+            await StageProgressStore().loadUnlockedStage(),
+            stageNumber + 1,
+          );
+        } else {
+          expect(find.text('GAME COMPLETE'), findsOneWidget);
+          expect(await StageProgressStore().loadUnlockedStage(), 5);
+        }
+      }
+      expect(
+        audio.effects.where((effect) => effect == GameSoundEffect.gemCollect),
+        hasLength(5),
+      );
+      await tester.pump(const Duration(seconds: 2));
+      expect(find.text('GAME COMPLETE'), findsOneWidget);
+      expect(find.text('PLAY AGAIN'), findsOneWidget);
+      await tester.tap(find.text('PLAY AGAIN'));
+      await tester.pump();
+      expect(find.textContaining('STAGE 1'), findsOneWidget);
+      expect(find.byKey(const ValueKey('score')), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
   group('variable orbit geometry', () {
     for (var count = 2; count <= 5; count++) {
       test('$count orbit lanes have direct, distinct touch targets', () {
@@ -405,38 +576,54 @@ void main() {
     expect(hazardLaneForScore(2, 0, 2), 1);
   });
 
-  testWidgets('five orbit lanes fit the compact play viewport', (tester) async {
-    tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(320, 568);
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    await tester.pumpWidget(
-      OrbitDashApp(orbitCount: 5, audioController: _TestAudioController()),
-    );
-    await tester.tap(find.text('START RUN'));
-    await tester.pump();
-    expect(find.byKey(const ValueKey('score')), findsOneWidget);
-    final paintRect = tester.getRect(
-      find.byKey(const ValueKey('orbit-lane-0')),
-    );
-    final geometry = OrbitGeometry.forSizeAndCount(
-      paintRect.size,
-      orbitCount: 5,
-    );
-    final target =
-        paintRect.topLeft + geometry.center + Offset(geometry.outerRadius, 0);
-    expect(
-      tester.getRect(find.byKey(const ValueKey('game-area'))).contains(target),
-      isTrue,
-      reason:
-          'target=$target paint=$paintRect area=${tester.getRect(find.byKey(const ValueKey('game-area')))}',
-    );
-    await tester.tapAt(target);
-    await tester.pump();
-    expect(find.byKey(const ValueKey('orbit-lane-4')), findsOneWidget);
-    expect(tester.takeException(), isNull);
-    await tester.pumpWidget(const SizedBox.shrink());
-  });
+  testWidgets(
+    'unlocked five-orbit stage fits compact viewport and accepts direct orbit taps',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({
+        'orbit_dash_best': 12,
+        StageProgressStore.preferenceKey: 4,
+      });
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(320, 568);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(
+        OrbitDashApp(audioController: _TestAudioController()),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('SELECT STAGE'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('LOCKED'), findsOneWidget);
+      await tester.ensureVisible(find.text('4. Cosmic Trial'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('stage-option-4')));
+      await tester.pump();
+      await tester.pump();
+      expect(find.byKey(const ValueKey('current-stage')), findsOneWidget);
+      expect(find.textContaining('STAGE 4'), findsOneWidget);
+      final paintRect = tester.getRect(
+        find.byKey(const ValueKey('orbit-lane-0')),
+      );
+      final geometry = OrbitGeometry.forSizeAndCount(
+        paintRect.size,
+        orbitCount: 5,
+      );
+      final target =
+          paintRect.topLeft + geometry.center + Offset(geometry.outerRadius, 0);
+      expect(
+        tester
+            .getRect(find.byKey(const ValueKey('game-area')))
+            .contains(target),
+        isTrue,
+      );
+      await tester.tapAt(target);
+      await tester.pump();
+      expect(find.byKey(const ValueKey('orbit-lane-4')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
   testWidgets('audio controls and cues follow game state transitions', (
     tester,
   ) async {
@@ -485,7 +672,7 @@ void main() {
 
     for (var frame = 0; frame < 220; frame++) {
       await tester.pump(const Duration(milliseconds: 50));
-      if (find.text('GAME OVER').evaluate().isNotEmpty) break;
+      if (find.text('STAGE FAILED').evaluate().isNotEmpty) break;
     }
     expect(audio.states, contains(AudioRunState.over));
     expect(audio.effects, contains(GameSoundEffect.collision));
@@ -540,4 +727,37 @@ class _TestAudioController extends GameAudioController {
 
   @override
   Future<void> shutdown() async => dispose();
+}
+
+Future<void> _tapOrbitLane(
+  WidgetTester tester,
+  int lane,
+  int orbitCount,
+) async {
+  final currentLane = List.generate(5, (index) => index).firstWhere(
+    (index) => find.byKey(ValueKey('orbit-lane-$index')).evaluate().isNotEmpty,
+  );
+  final rect = tester.getRect(find.byKey(ValueKey('orbit-lane-$currentLane')));
+  final geometry = OrbitGeometry.forSizeAndCount(
+    rect.size,
+    orbitCount: orbitCount,
+  );
+  await tester.tapAt(
+    rect.topLeft + geometry.center + Offset(geometry.radiusForLane(lane), 0),
+  );
+  await tester.pump();
+}
+
+Future<void> _completeTestStage(WidgetTester tester, int orbitCount) async {
+  if (orbitCount > 2) {
+    await _tapOrbitLane(tester, orbitCount - 1, orbitCount);
+  }
+  await _tapOrbitLane(tester, 1, orbitCount);
+  for (var frame = 0; frame < 45; frame++) {
+    await tester.pump(const Duration(milliseconds: 50));
+    if (find.text('STAGE COMPLETE').evaluate().isNotEmpty ||
+        find.text('GAME COMPLETE').evaluate().isNotEmpty) {
+      break;
+    }
+  }
 }
