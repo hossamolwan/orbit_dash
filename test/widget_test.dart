@@ -306,24 +306,137 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  test(
-    'touch selection targets orbit lines and ignores gaps and distant taps',
-    () {
-      const geometry = OrbitGeometry(
-        center: Offset(100, 100),
-        innerRadius: 60,
-        outerRadius: 100,
-      );
-      expect(geometry.laneAt(const Offset(100, 40)), 0);
-      expect(geometry.laneAt(const Offset(100, 0)), 1);
-      expect(geometry.laneAt(const Offset(100, 80)), isNull);
-      expect(geometry.laneAt(const Offset(100, 140)), isNull);
-      expect(laneAfterOrbitTouch(0, geometry, const Offset(100, 40)), 0);
-      expect(laneAfterOrbitTouch(1, geometry, const Offset(100, 80)), 1);
-      expect(laneAfterOrbitTouch(1, geometry, const Offset(100, 140)), 1);
-    },
-  );
+  group('variable orbit geometry', () {
+    for (var count = 2; count <= 5; count++) {
+      test('$count orbit lanes have direct, distinct touch targets', () {
+        final geometry = OrbitGeometry.forSizeAndCount(
+          const Size(360, 360),
+          orbitCount: count,
+        );
+        expect(geometry.radii, hasLength(count));
+        for (var lane = 0; lane < count; lane++) {
+          final point =
+              geometry.center + Offset(geometry.radiusForLane(lane), 0);
+          expect(geometry.laneAt(point), lane);
+          expect(
+            geometry.laneAt(
+              geometry.center +
+                  Offset(
+                    geometry.radiusForLane(lane) + geometry.touchTolerance * .9,
+                    0,
+                  ),
+            ),
+            lane,
+          );
+          expect(laneAfterOrbitTouch(0, geometry, point), lane);
+          expect(laneAfterOrbitTouch(lane, geometry, point), lane);
+        }
+        for (var lane = 0; lane < count - 1; lane++) {
+          final midpointRadius =
+              (geometry.radii[lane] + geometry.radii[lane + 1]) / 2;
+          final midpoint = geometry.center + Offset(midpointRadius, 0);
+          expect(geometry.laneAt(midpoint), isNull);
+          expect(laneAfterOrbitTouch(lane, geometry, midpoint), lane);
+        }
+        expect(geometry.laneAt(geometry.center), isNull);
+        expect(
+          geometry.laneAt(
+            geometry.center + Offset(geometry.outerRadius * 1.5, 0),
+          ),
+          isNull,
+        );
+      });
+    }
 
+    test('two orbit radii preserve the original spacing', () {
+      final geometry = OrbitGeometry.forSizeAndCount(
+        const Size(360, 360),
+        orbitCount: 2,
+      );
+      expect(geometry.innerRadius, closeTo(360 * .34 * .72, .0001));
+      expect(geometry.outerRadius, closeTo(360 * .34, .0001));
+    });
+  });
+
+  test('lane-aware hazards and gems preserve angle rules', () {
+    expect(
+      isLaneCollision(
+        playerLane: 4,
+        hazardLane: 4,
+        playerAngle: 0,
+        hazardAngle: .1,
+      ),
+      isTrue,
+    );
+    expect(
+      isLaneCollision(
+        playerLane: 1,
+        hazardLane: 3,
+        playerAngle: 0,
+        hazardAngle: .01,
+      ),
+      isFalse,
+    );
+    expect(
+      shouldCollectGem(playerLane: 3, gemLane: 3, playerAngle: 0, gemAngle: .1),
+      isTrue,
+    );
+    expect(
+      shouldCollectGem(
+        playerLane: 2,
+        gemLane: 4,
+        playerAngle: 0,
+        gemAngle: .01,
+      ),
+      isFalse,
+    );
+    expect(nextOrbitLane(4, 5), 0);
+    for (var count = 2; count <= 5; count++) {
+      for (var lane = 0; lane < count; lane++) {
+        final nextLane = nextOrbitLane(lane, count);
+        expect(nextLane, inInclusiveRange(0, count - 1));
+        for (var score = 0; score < 8; score++) {
+          final hazardLane = hazardLaneForScore(score, lane, count);
+          expect(hazardLane, inInclusiveRange(0, count - 1));
+          if (count > 2) expect(hazardLane, isNot(lane));
+        }
+      }
+    }
+    expect(hazardLaneForScore(2, 0, 2), 1);
+  });
+
+  testWidgets('five orbit lanes fit the compact play viewport', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(320, 568);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(
+      OrbitDashApp(orbitCount: 5, audioController: _TestAudioController()),
+    );
+    await tester.tap(find.text('START RUN'));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('score')), findsOneWidget);
+    final paintRect = tester.getRect(
+      find.byKey(const ValueKey('orbit-lane-0')),
+    );
+    final geometry = OrbitGeometry.forSizeAndCount(
+      paintRect.size,
+      orbitCount: 5,
+    );
+    final target =
+        paintRect.topLeft + geometry.center + Offset(geometry.outerRadius, 0);
+    expect(
+      tester.getRect(find.byKey(const ValueKey('game-area'))).contains(target),
+      isTrue,
+      reason:
+          'target=$target paint=$paintRect area=${tester.getRect(find.byKey(const ValueKey('game-area')))}',
+    );
+    await tester.tapAt(target);
+    await tester.pump();
+    expect(find.byKey(const ValueKey('orbit-lane-4')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
   testWidgets('audio controls and cues follow game state transitions', (
     tester,
   ) async {

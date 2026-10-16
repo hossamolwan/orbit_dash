@@ -9,9 +9,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() => runApp(const OrbitDashApp());
 
 class OrbitDashApp extends StatelessWidget {
-  const OrbitDashApp({super.key, this.audioController});
+  const OrbitDashApp({super.key, this.audioController, this.orbitCount = 2})
+    : assert(orbitCount >= 2 && orbitCount <= 5);
 
   final GameAudioController? audioController;
+  final int orbitCount;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -21,7 +23,10 @@ class OrbitDashApp extends StatelessWidget {
       scaffoldBackgroundColor: const Color(0xff070b18),
       colorScheme: const ColorScheme.dark(primary: Color(0xff55e7ff)),
     ),
-    home: OrbitGamePage(audioController: audioController),
+    home: OrbitGamePage(
+      audioController: audioController,
+      orbitCount: orbitCount,
+    ),
   );
 }
 
@@ -37,37 +42,88 @@ double shortestAngularDistance(double first, double second) {
 bool isAngularCollision(double first, double second) =>
     shortestAngularDistance(first, second) < 0.16;
 
+bool isLaneCollision({
+  required int playerLane,
+  required int hazardLane,
+  required double playerAngle,
+  required double hazardAngle,
+}) => playerLane == hazardLane && isAngularCollision(playerAngle, hazardAngle);
+
+bool shouldCollectGem({
+  required int playerLane,
+  required int gemLane,
+  required double playerAngle,
+  required double gemAngle,
+}) =>
+    playerLane == gemLane &&
+    shortestAngularDistance(playerAngle, gemAngle) < 0.12;
+
+int nextOrbitLane(int lane, int orbitCount) => (lane + 1) % orbitCount;
+
+int hazardLaneForScore(int score, int playerLane, int orbitCount) {
+  if (orbitCount == 2) {
+    return score % 3 == 2 ? 1 - playerLane : score % 2;
+  }
+  return (playerLane + 1 + score % (orbitCount - 1)) % orbitCount;
+}
+
 /// The shared geometry used by both orbit rendering and touch selection.
 class OrbitGeometry {
-  const OrbitGeometry({
-    required this.center,
-    required this.innerRadius,
-    required this.outerRadius,
-  });
+  const OrbitGeometry({required this.center, required this.radii});
 
   factory OrbitGeometry.forSize(Size size) {
-    final radius = size.width * 0.34;
+    return OrbitGeometry.forSizeAndCount(size, orbitCount: 2);
+  }
+
+  factory OrbitGeometry.forSizeAndCount(Size size, {required int orbitCount}) {
+    assert(orbitCount >= 2 && orbitCount <= 5);
+    final outerRadius = size.width * (orbitCount == 2 ? 0.34 : 0.43);
+    final innerRadius = orbitCount == 2
+        ? outerRadius * 0.72
+        : outerRadius * 0.18;
     return OrbitGeometry(
       center: Offset(size.width / 2, size.height / 2 + size.height * 0.035),
-      innerRadius: radius * 0.72,
-      outerRadius: radius,
+      radii: List<double>.unmodifiable(
+        List<double>.generate(
+          orbitCount,
+          (index) =>
+              innerRadius +
+              (outerRadius - innerRadius) * index / (orbitCount - 1),
+        ),
+      ),
     );
   }
 
   final Offset center;
-  final double innerRadius;
-  final double outerRadius;
+  final List<double> radii;
+  double get innerRadius => radii.first;
+  double get outerRadius => radii.last;
+  double get touchTolerance => radii.length == 2
+      ? math.min(18.0, (outerRadius - innerRadius) / 2)
+      : math.min(18.0, (outerRadius - innerRadius) / (radii.length - 1) / 2);
+
+  double radiusForLane(int lane) => radii[lane];
 
   int? laneAt(Offset position) {
     final distance = (position - center).distance;
-    final innerDistance = (distance - innerRadius).abs();
-    final outerDistance = (distance - outerRadius).abs();
-    final tolerance = math.min(18.0, (outerRadius - innerRadius) / 2);
-    if (innerDistance == outerDistance ||
-        math.min(innerDistance, outerDistance) > tolerance) {
+    var closestLane = 0;
+    var closestDistance = (distance - radii.first).abs();
+    var secondClosestDistance = double.infinity;
+    for (var lane = 1; lane < radii.length; lane++) {
+      final laneDistance = (distance - radii[lane]).abs();
+      if (laneDistance < closestDistance) {
+        secondClosestDistance = closestDistance;
+        closestDistance = laneDistance;
+        closestLane = lane;
+      } else if (laneDistance < secondClosestDistance) {
+        secondClosestDistance = laneDistance;
+      }
+    }
+    if ((secondClosestDistance - closestDistance).abs() < 0.0001 ||
+        closestDistance > touchTolerance) {
       return null;
     }
-    return innerDistance < outerDistance ? 0 : 1;
+    return closestLane;
   }
 }
 
@@ -86,9 +142,11 @@ double hazardSpawnIntervalForScore(int score) =>
     math.max(0.85, 2.0 - score * 0.025);
 
 class OrbitGamePage extends StatefulWidget {
-  const OrbitGamePage({super.key, this.audioController});
+  const OrbitGamePage({super.key, this.audioController, this.orbitCount = 2})
+    : assert(orbitCount >= 2 && orbitCount <= 5);
 
   final GameAudioController? audioController;
+  final int orbitCount;
 
   @override
   State<OrbitGamePage> createState() => _OrbitGamePageState();
@@ -156,26 +214,34 @@ class _OrbitGamePageState extends State<OrbitGamePage>
         _hazards.add(
           _Hazard(
             (_angle + math.pi + 0.4) % (math.pi * 2),
-            _score % 3 == 2 ? 1 - _lane : (_score % 2),
+            hazardLaneForScore(_score, _lane, widget.orbitCount),
           ),
         );
       }
       for (final hazard in _hazards) {
         hazard.angle = (hazard.angle + speed * 0.7 * dt) % (math.pi * 2);
-        if (hazard.lane == _lane && isAngularCollision(_angle, hazard.angle)) {
+        if (isLaneCollision(
+          playerLane: _lane,
+          hazardLane: hazard.lane,
+          playerAngle: _angle,
+          hazardAngle: hazard.angle,
+        )) {
           _finish();
           return;
         }
         hazard.relativeAngleTravel += speed * 0.3 * dt;
       }
       _hazards.removeWhere((h) => hazardLifetimeExpired(h.relativeAngleTravel));
-      final gemDifference = (_angle - _gemAngle).abs() % (2 * math.pi);
-      if (_gemLane == _lane &&
-          math.min(gemDifference, 2 * math.pi - gemDifference) < 0.12) {
+      if (shouldCollectGem(
+        playerLane: _lane,
+        gemLane: _gemLane,
+        playerAngle: _angle,
+        gemAngle: _gemAngle,
+      )) {
         _score++;
         _audio.playEffect(GameSoundEffect.gemCollect);
         _gemAngle = (_angle + 2.4 + (_score % 3) * 0.45) % (math.pi * 2);
-        _gemLane = 1 - _gemLane;
+        _gemLane = nextOrbitLane(_gemLane, widget.orbitCount);
       }
     });
   }
@@ -188,7 +254,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
       _spawnClock = 0;
       _hazards.clear();
       _gemAngle = 0.7;
-      _gemLane = 1;
+      _gemLane = nextOrbitLane(0, widget.orbitCount);
       _state = RunState.playing;
       _lastTick = Duration.zero;
     });
@@ -240,7 +306,10 @@ class _OrbitGamePageState extends State<OrbitGamePage>
           _orbitCanvasKey.currentContext!.findRenderObject()! as RenderBox;
       final selectedLane = laneAfterOrbitTouch(
         _lane,
-        OrbitGeometry.forSize(canvas.size),
+        OrbitGeometry.forSizeAndCount(
+          canvas.size,
+          orbitCount: widget.orbitCount,
+        ),
         canvas.globalToLocal(globalPosition),
       );
       if (selectedLane == _lane) return;
@@ -375,6 +444,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                           painter: _OrbitPainter(
                             angle: _angle,
                             lane: _lane,
+                            orbitCount: widget.orbitCount,
                             hazards: List.of(_hazards),
                             gemAngle: _gemAngle,
                             gemLane: _gemLane,
@@ -386,28 +456,31 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                           top: 0,
                           left: 0,
                           right: 0,
-                          child: Column(
-                            children: [
-                              const Text(
-                                'SCORE',
-                                style: TextStyle(
-                                  color: Colors.white54,
-                                  letterSpacing: 2.5,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold,
+                          child: IgnorePointer(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Text(
+                                  'SCORE',
+                                  style: TextStyle(
+                                    color: Colors.white54,
+                                    letterSpacing: 2.5,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                  ),
                                 ),
-                              ),
-                              Text(
-                                '$_score',
-                                key: const ValueKey('score'),
-                                style: const TextStyle(
-                                  fontSize: 48,
-                                  fontWeight: FontWeight.w300,
-                                  color: Colors.white,
-                                  height: 1.12,
+                                Text(
+                                  '$_score',
+                                  key: const ValueKey('score'),
+                                  style: const TextStyle(
+                                    fontSize: 48,
+                                    fontWeight: FontWeight.w300,
+                                    color: Colors.white,
+                                    height: 1.12,
+                                  ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
                       if (_state != RunState.playing) _overlay(),
@@ -799,21 +872,23 @@ class _OrbitPainter extends CustomPainter {
   const _OrbitPainter({
     required this.angle,
     required this.lane,
+    required this.orbitCount,
     required this.hazards,
     required this.gemAngle,
     required this.gemLane,
   });
   final double angle, gemAngle;
-  final int lane, gemLane;
+  final int lane, gemLane, orbitCount;
   final List<_Hazard> hazards;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final geometry = OrbitGeometry.forSize(size);
+    final geometry = OrbitGeometry.forSizeAndCount(
+      size,
+      orbitCount: orbitCount,
+    );
     final center = geometry.center;
-    final radius = size.width * 0.34;
-    final inner = geometry.innerRadius;
-    final outer = geometry.outerRadius;
+    final radius = geometry.outerRadius;
     final bg = Paint()
       ..shader = RadialGradient(
         colors: [
@@ -830,7 +905,7 @@ class _OrbitPainter extends CustomPainter {
         star.paint,
       );
     }
-    for (final r in [inner, outer]) {
+    for (final r in geometry.radii) {
       canvas.drawCircle(
         center,
         r,
@@ -856,12 +931,12 @@ class _OrbitPainter extends CustomPainter {
           ..strokeWidth = .55,
       );
     }
-    _orbitMarkers(canvas, center, inner, outer);
-    _planet(canvas, center, radius * .40);
+    _orbitMarkers(canvas, center, geometry.radii);
+    _planet(canvas, center, radius * (orbitCount == 2 ? .40 : .10));
     _orbitalThing(
       canvas,
       center,
-      lane == 0 ? inner : outer,
+      geometry.radiusForLane(lane),
       angle,
       const Color(0xff60efff),
       8,
@@ -872,35 +947,62 @@ class _OrbitPainter extends CustomPainter {
       _orbitalThing(
         canvas,
         center,
-        hazard.lane == 0 ? inner : outer,
+        geometry.radiusForLane(hazard.lane),
         hazard.angle,
         const Color(0xffff445d),
         9,
         glow: true,
       );
     }
-    _gem(canvas, center, gemLane == 0 ? inner : outer, gemAngle);
+    _gem(canvas, center, geometry.radiusForLane(gemLane), gemAngle);
   }
 
-  void _orbitMarkers(Canvas canvas, Offset center, double inner, double outer) {
+  void _orbitMarkers(Canvas canvas, Offset center, List<double> radii) {
     final paint = Paint()
       ..color = const Color(0xff8cecff).withValues(alpha: .35)
       ..strokeWidth = 1;
     for (int i = 0; i < 12; i++) {
       final angle = i * _fullTurn / 12;
-      final startRadius = inner - 2;
-      final endRadius = i % 3 == 0 ? outer + 5 : inner + 2;
-      canvas.drawLine(
-        center +
-            Offset(
-              math.cos(angle) * startRadius,
-              math.sin(angle) * startRadius,
-            ),
-        center +
-            Offset(math.cos(angle) * endRadius, math.sin(angle) * endRadius),
-        paint,
-      );
+      if (radii.length == 2) {
+        _radialMark(
+          canvas,
+          center,
+          radii.first - 2,
+          i % 3 == 0 ? radii.last + 5 : radii.first + 2,
+          angle,
+          paint,
+        );
+      } else if (i % 3 == 0) {
+        _radialMark(
+          canvas,
+          center,
+          radii.first - 2,
+          radii.last + 5,
+          angle,
+          paint,
+        );
+      } else {
+        for (final radius in radii) {
+          _radialMark(canvas, center, radius - 2, radius + 2, angle, paint);
+        }
+      }
     }
+  }
+
+  void _radialMark(
+    Canvas canvas,
+    Offset center,
+    double startRadius,
+    double endRadius,
+    double angle,
+    Paint paint,
+  ) {
+    canvas.drawLine(
+      center +
+          Offset(math.cos(angle) * startRadius, math.sin(angle) * startRadius),
+      center + Offset(math.cos(angle) * endRadius, math.sin(angle) * endRadius),
+      paint,
+    );
   }
 
   void _planet(Canvas c, Offset center, double r) {
