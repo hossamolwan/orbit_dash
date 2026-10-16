@@ -37,6 +37,46 @@ double shortestAngularDistance(double first, double second) {
 bool isAngularCollision(double first, double second) =>
     shortestAngularDistance(first, second) < 0.16;
 
+/// The shared geometry used by both orbit rendering and touch selection.
+class OrbitGeometry {
+  const OrbitGeometry({
+    required this.center,
+    required this.innerRadius,
+    required this.outerRadius,
+  });
+
+  factory OrbitGeometry.forSize(Size size) {
+    final radius = size.width * 0.34;
+    return OrbitGeometry(
+      center: Offset(size.width / 2, size.height / 2 + size.height * 0.035),
+      innerRadius: radius * 0.72,
+      outerRadius: radius,
+    );
+  }
+
+  final Offset center;
+  final double innerRadius;
+  final double outerRadius;
+
+  int? laneAt(Offset position) {
+    final distance = (position - center).distance;
+    final innerDistance = (distance - innerRadius).abs();
+    final outerDistance = (distance - outerRadius).abs();
+    final tolerance = math.min(18.0, (outerRadius - innerRadius) / 2);
+    if (innerDistance == outerDistance ||
+        math.min(innerDistance, outerDistance) > tolerance) {
+      return null;
+    }
+    return innerDistance < outerDistance ? 0 : 1;
+  }
+}
+
+int laneAfterOrbitTouch(
+  int currentLane,
+  OrbitGeometry geometry,
+  Offset position,
+) => geometry.laneAt(position) ?? currentLane;
+
 bool hazardLifetimeExpired(double relativeAngleTravel) =>
     relativeAngleTravel >= _fullTurn;
 
@@ -56,6 +96,7 @@ class OrbitGamePage extends StatefulWidget {
 
 class _OrbitGamePageState extends State<OrbitGamePage>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+  final GlobalKey _orbitCanvasKey = GlobalKey();
   late final GameAudioController _audio;
   late final Ticker _ticker;
   Duration _lastTick = Duration.zero;
@@ -193,9 +234,17 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     _audio.setGameState(AudioRunState.menu);
   }
 
-  void _tapGame() {
+  void _tapGame(Offset globalPosition) {
     if (_state == RunState.playing) {
-      setState(() => _lane = 1 - _lane);
+      final canvas =
+          _orbitCanvasKey.currentContext!.findRenderObject()! as RenderBox;
+      final selectedLane = laneAfterOrbitTouch(
+        _lane,
+        OrbitGeometry.forSize(canvas.size),
+        canvas.globalToLocal(globalPosition),
+      );
+      if (selectedLane == _lane) return;
+      setState(() => _lane = selectedLane);
       _audio.playEffect(GameSoundEffect.orbitSwitch);
     }
   }
@@ -312,11 +361,12 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                 child: GestureDetector(
                   key: const ValueKey('game-area'),
                   behavior: HitTestBehavior.opaque,
-                  onTap: _tapGame,
+                  onTapDown: (details) => _tapGame(details.globalPosition),
                   child: Stack(
                     alignment: Alignment.center,
                     children: [
                       SizedBox(
+                        key: _orbitCanvasKey,
                         width: side,
                         height: side,
                         child: CustomPaint(
@@ -377,7 +427,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                     ),
                     SizedBox(width: 8),
                     Text(
-                      'TAP TO SWITCH ORBITS',
+                      'TAP AN ORBIT TO MOVE',
                       style: TextStyle(
                         color: Color(0xff7d8ba5),
                         letterSpacing: 2,
@@ -759,13 +809,11 @@ class _OrbitPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final center = Offset(
-      size.width / 2,
-      size.height / 2 + size.height * 0.035,
-    );
+    final geometry = OrbitGeometry.forSize(size);
+    final center = geometry.center;
     final radius = size.width * 0.34;
-    final inner = radius * 0.72;
-    final outer = radius;
+    final inner = geometry.innerRadius;
+    final outer = geometry.outerRadius;
     final bg = Paint()
       ..shader = RadialGradient(
         colors: [

@@ -207,7 +207,10 @@ void main() {
     await tester.pumpWidget(_testApp());
     expect(find.text('START RUN'), findsOneWidget);
     expect(
-      tester.state<ScrollableState>(find.byType(Scrollable)).position.maxScrollExtent,
+      tester
+          .state<ScrollableState>(find.byType(Scrollable))
+          .position
+          .maxScrollExtent,
       0,
     );
     final buttonRect = tester.getRect(find.text('START RUN'));
@@ -221,7 +224,10 @@ void main() {
     await tester.pump();
     expect(find.text('PAUSED'), findsOneWidget);
     expect(
-      tester.state<ScrollableState>(find.byType(Scrollable)).position.maxScrollExtent,
+      tester
+          .state<ScrollableState>(find.byType(Scrollable))
+          .position
+          .maxScrollExtent,
       0,
     );
     expect(tester.getRect(find.text('RESUME')).bottom, lessThanOrEqualTo(568));
@@ -273,7 +279,10 @@ void main() {
 
     expect(find.text('GAME OVER'), findsOneWidget);
     expect(
-      tester.state<ScrollableState>(find.byType(Scrollable)).position.maxScrollExtent,
+      tester
+          .state<ScrollableState>(find.byType(Scrollable))
+          .position
+          .maxScrollExtent,
       0,
     );
     for (final label in [
@@ -283,7 +292,11 @@ void main() {
       'MAIN MENU',
     ]) {
       final rect = tester.getRect(find.text(label));
-      expect(rect.top, greaterThanOrEqualTo(0), reason: '$label is above screen');
+      expect(
+        rect.top,
+        greaterThanOrEqualTo(0),
+        reason: '$label is above screen',
+      );
       expect(
         rect.bottom,
         lessThanOrEqualTo(568),
@@ -293,48 +306,23 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('taps switch orbits only inside the complete play area', (
-    tester,
-  ) async {
-    tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(360, 720);
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-
-    final audio = _TestAudioController();
-    await tester.pumpWidget(OrbitDashApp(audioController: audio));
-    await tester.tap(find.text('START RUN'));
-    await tester.pump();
-
-    final playArea = tester.getRect(find.byKey(const ValueKey('game-area')));
-    final distantPoint = Offset(playArea.left + 8, playArea.top + 8);
-    expect(find.byKey(const ValueKey('orbit-lane-0')), findsOneWidget);
-
-    await tester.tapAt(distantPoint);
-    await tester.pump();
-    expect(find.byKey(const ValueKey('orbit-lane-1')), findsOneWidget);
-    expect(
-      audio.effects.where((effect) => effect == GameSoundEffect.orbitSwitch),
-      hasLength(1),
-    );
-
-    await tester.tapAt(distantPoint);
-    await tester.pump();
-    expect(find.byKey(const ValueKey('orbit-lane-0')), findsOneWidget);
-    expect(
-      audio.effects.where((effect) => effect == GameSoundEffect.orbitSwitch),
-      hasLength(2),
-    );
-
-    await tester.tapAt(Offset(playArea.center.dx, playArea.top - 1));
-    await tester.pump();
-    expect(find.byKey(const ValueKey('orbit-lane-0')), findsOneWidget);
-    expect(
-      audio.effects.where((effect) => effect == GameSoundEffect.orbitSwitch),
-      hasLength(2),
-    );
-    await tester.pumpWidget(const SizedBox.shrink());
-  });
+  test(
+    'touch selection targets orbit lines and ignores gaps and distant taps',
+    () {
+      const geometry = OrbitGeometry(
+        center: Offset(100, 100),
+        innerRadius: 60,
+        outerRadius: 100,
+      );
+      expect(geometry.laneAt(const Offset(100, 40)), 0);
+      expect(geometry.laneAt(const Offset(100, 0)), 1);
+      expect(geometry.laneAt(const Offset(100, 80)), isNull);
+      expect(geometry.laneAt(const Offset(100, 140)), isNull);
+      expect(laneAfterOrbitTouch(0, geometry, const Offset(100, 40)), 0);
+      expect(laneAfterOrbitTouch(1, geometry, const Offset(100, 80)), 1);
+      expect(laneAfterOrbitTouch(1, geometry, const Offset(100, 140)), 1);
+    },
+  );
 
   testWidgets('audio controls and cues follow game state transitions', (
     tester,
@@ -364,7 +352,7 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('game-area')));
     await tester.pump();
-    expect(audio.effects, contains(GameSoundEffect.orbitSwitch));
+    expect(audio.effects, isNot(contains(GameSoundEffect.orbitSwitch)));
     expect(audio.states.last, AudioRunState.playing);
     await tester.tap(find.byTooltip('Pause'));
     await tester.pump();
@@ -387,7 +375,6 @@ void main() {
       if (find.text('GAME OVER').evaluate().isNotEmpty) break;
     }
     expect(audio.states, contains(AudioRunState.over));
-    expect(audio.effects, contains(GameSoundEffect.gemCollect));
     expect(audio.effects, contains(GameSoundEffect.collision));
 
     await tester.tap(find.text('MAIN MENU'));
