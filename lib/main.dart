@@ -35,6 +35,52 @@ enum RunState {
   gameComplete,
 }
 
+/// Deterministic controls and observations for game-cycle widget tests.
+class OrbitGameTestDriver {
+  late void Function() _placeShieldAtPlayer;
+  late void Function() _placeHazardAtPlayer;
+  late void Function() _placeGemAtPlayer;
+  late void Function() _moveGemAwayFromPlayer;
+  late bool Function() _readShieldActive;
+  late Duration Function() _readShieldRemaining;
+  late int Function() _readHazardCount;
+  late int Function() _readScore;
+  late RunState Function() _readRunState;
+
+  bool get shieldActive => _readShieldActive();
+  Duration get shieldRemaining => _readShieldRemaining();
+  int get hazardCount => _readHazardCount();
+  int get score => _readScore();
+  RunState get runState => _readRunState();
+
+  void placeShieldAtPlayer() => _placeShieldAtPlayer();
+  void placeHazardAtPlayer() => _placeHazardAtPlayer();
+  void placeGemAtPlayer() => _placeGemAtPlayer();
+  void moveGemAwayFromPlayer() => _moveGemAwayFromPlayer();
+
+  void _attach({
+    required void Function() placeShieldAtPlayer,
+    required void Function() placeHazardAtPlayer,
+    required void Function() placeGemAtPlayer,
+    required void Function() moveGemAwayFromPlayer,
+    required bool Function() readShieldActive,
+    required Duration Function() readShieldRemaining,
+    required int Function() readHazardCount,
+    required int Function() readScore,
+    required RunState Function() readRunState,
+  }) {
+    _placeShieldAtPlayer = placeShieldAtPlayer;
+    _placeHazardAtPlayer = placeHazardAtPlayer;
+    _placeGemAtPlayer = placeGemAtPlayer;
+    _moveGemAwayFromPlayer = moveGemAwayFromPlayer;
+    _readShieldActive = readShieldActive;
+    _readShieldRemaining = readShieldRemaining;
+    _readHazardCount = readHazardCount;
+    _readScore = readScore;
+    _readRunState = readRunState;
+  }
+}
+
 class StageDefinition {
   const StageDefinition({
     required this.number,
@@ -149,6 +195,60 @@ bool shouldCollectGem({
     playerLane == gemLane &&
     shortestAngularDistance(playerAngle, gemAngle) < 0.12;
 
+bool shouldCollectShield({
+  required int playerLane,
+  required int shieldLane,
+  required double playerAngle,
+  required double shieldAngle,
+}) => shouldCollectGem(
+  playerLane: playerLane,
+  gemLane: shieldLane,
+  playerAngle: playerAngle,
+  gemAngle: shieldAngle,
+);
+
+/// Countdown state for the single-use, five-second shield.
+class TemporaryShield {
+  static const duration = Duration(seconds: 5);
+
+  Duration _remaining = Duration.zero;
+
+  bool get isActive => _remaining > Duration.zero;
+  Duration get remaining => _remaining;
+
+  bool activate() {
+    if (isActive) return false;
+    _remaining = duration;
+    return true;
+  }
+
+  void advance(Duration elapsed) {
+    if (!isActive || elapsed <= Duration.zero) return;
+    _remaining -= elapsed;
+    if (_remaining < Duration.zero) _remaining = Duration.zero;
+  }
+
+  bool absorbCollision() {
+    if (!isActive) return false;
+    _remaining = Duration.zero;
+    return true;
+  }
+
+  void reset() => _remaining = Duration.zero;
+}
+
+enum ShieldCollisionResponse { noCollision, absorbed, fatal }
+
+ShieldCollisionResponse shieldCollisionResponse(
+  TemporaryShield shield, {
+  required bool collision,
+}) {
+  if (!collision) return ShieldCollisionResponse.noCollision;
+  return shield.absorbCollision()
+      ? ShieldCollisionResponse.absorbed
+      : ShieldCollisionResponse.fatal;
+}
+
 int nextOrbitLane(int lane, int orbitCount) => (lane + 1) % orbitCount;
 
 int hazardLaneForScore(int score, int playerLane, int orbitCount) {
@@ -237,10 +337,12 @@ class OrbitGamePage extends StatefulWidget {
     super.key,
     this.audioController,
     this.stages = orbitStages,
+    this.testDriver,
   }) : assert(stages.length >= 1 && stages.length <= 5);
 
   final GameAudioController? audioController;
   final List<StageDefinition> stages;
+  final OrbitGameTestDriver? testDriver;
 
   @override
   State<OrbitGamePage> createState() => _OrbitGamePageState();
@@ -268,6 +370,11 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   int _gemLane = 1;
   final List<_Hazard> _hazards = [];
   double _spawnClock = 0;
+  final TemporaryShield _shield = TemporaryShield();
+  final math.Random _random = math.Random();
+  _ShieldPickup? _shieldPickup;
+  double _shieldSpawnClock = 0;
+  double _nextShieldSpawnAt = 12;
 
   StageDefinition get _currentStage => widget.stages[_currentStageIndex];
 
@@ -283,6 +390,27 @@ class _OrbitGamePageState extends State<OrbitGamePage>
       }),
     );
     _ticker = createTicker(_tick);
+    widget.testDriver?._attach(
+      placeShieldAtPlayer: () => setState(() {
+        _shieldPickup = _ShieldPickup(_angle, _lane);
+      }),
+      placeHazardAtPlayer: () => setState(() {
+        _hazards.add(_Hazard(_angle, _lane));
+      }),
+      placeGemAtPlayer: () => setState(() {
+        _gemAngle = _angle;
+        _gemLane = _lane;
+      }),
+      moveGemAwayFromPlayer: () => setState(() {
+        _gemLane = (_lane + 1) % _currentStage.orbitCount;
+        _gemAngle = _angle;
+      }),
+      readShieldActive: () => _shield.isActive,
+      readShieldRemaining: () => _shield.remaining,
+      readHazardCount: () => _hazards.length,
+      readScore: () => _score,
+      readRunState: () => _state,
+    );
     unawaited(_loadStageProgress());
     SharedPreferences.getInstance().then((prefs) {
       if (mounted) setState(() => _best = prefs.getInt('orbit_dash_best') ?? 0);
@@ -321,6 +449,8 @@ class _OrbitGamePageState extends State<OrbitGamePage>
               .toDouble();
     _lastTick = now;
     setState(() {
+      final shieldWasActive = _shield.isActive;
+      _shield.advance(Duration(microseconds: (dt * 1000000).round()));
       final speed = playerSpeedForScore(_score);
       _angle += speed * dt;
       _spawnClock += dt;
@@ -333,20 +463,48 @@ class _OrbitGamePageState extends State<OrbitGamePage>
           ),
         );
       }
+      _updateShieldSpawn(dt);
+      final pickup = _shieldPickup;
+      if (!shieldWasActive && !_shield.isActive && pickup != null) {
+        if (shouldCollectShield(
+          playerLane: _lane,
+          shieldLane: pickup.lane,
+          playerAngle: _angle,
+          shieldAngle: pickup.angle,
+        )) {
+          _shield.activate();
+          _shieldPickup = null;
+          _shieldSpawnClock = 0;
+        }
+      }
+      final absorbedHazards = <_Hazard>[];
       for (final hazard in _hazards) {
         hazard.angle = (hazard.angle + speed * 0.7 * dt) % (math.pi * 2);
-        if (isLaneCollision(
+        final collision = isLaneCollision(
           playerLane: _lane,
           hazardLane: hazard.lane,
           playerAngle: _angle,
           hazardAngle: hazard.angle,
-        )) {
+        );
+        final collisionResponse = shieldCollisionResponse(
+          _shield,
+          collision: collision,
+        );
+        if (collisionResponse != ShieldCollisionResponse.noCollision) {
+          if (collisionResponse == ShieldCollisionResponse.absorbed) {
+            absorbedHazards.add(hazard);
+            continue;
+          }
           _finish();
           return;
         }
         hazard.relativeAngleTravel += speed * 0.3 * dt;
       }
-      _hazards.removeWhere((h) => hazardLifetimeExpired(h.relativeAngleTravel));
+      _hazards.removeWhere(
+        (h) =>
+            absorbedHazards.contains(h) ||
+            hazardLifetimeExpired(h.relativeAngleTravel),
+      );
       if (shouldCollectGem(
         playerLane: _lane,
         gemLane: _gemLane,
@@ -365,6 +523,22 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     });
   }
 
+  void _updateShieldSpawn(double dt) {
+    if (_shield.isActive || _shieldPickup != null) {
+      _shieldSpawnClock = 0;
+      return;
+    }
+    _shieldSpawnClock += dt;
+    if (_shieldSpawnClock < _nextShieldSpawnAt) return;
+
+    _shieldSpawnClock = 0;
+    _nextShieldSpawnAt = 12 + _random.nextDouble() * 8;
+    _shieldPickup = _ShieldPickup(
+      (_angle + 0.4 + _random.nextDouble() * 1.4) % _fullTurn,
+      _random.nextInt(_currentStage.orbitCount),
+    );
+  }
+
   void _start({int? stageIndex}) {
     final requestedStage = stageIndex ?? _currentStageIndex;
     if (requestedStage < 0 ||
@@ -379,6 +553,10 @@ class _OrbitGamePageState extends State<OrbitGamePage>
       _angle = -math.pi / 2;
       _spawnClock = 0;
       _hazards.clear();
+      _shield.reset();
+      _shieldPickup = null;
+      _shieldSpawnClock = 0;
+      _nextShieldSpawnAt = 12 + _random.nextDouble() * 8;
       _gemAngle = 0.7;
       _gemLane = nextOrbitLane(0, _currentStage.orbitCount);
       _completionGate.reset();
@@ -395,6 +573,8 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     if (_state != RunState.playing) return;
     _state = RunState.over;
     _ticker.stop();
+    _shield.reset();
+    _shieldPickup = null;
     _audio.setGameState(AudioRunState.over);
     _audio.playEffect(GameSoundEffect.collision);
     _saveBestScore();
@@ -403,6 +583,8 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   void _completeStage() {
     if (_state != RunState.playing || _completionHandled) return;
     _completionHandled = true;
+    _shield.reset();
+    _shieldPickup = null;
     _state = _currentStageIndex == widget.stages.length - 1
         ? RunState.gameComplete
         : RunState.stageComplete;
@@ -475,6 +657,9 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     _ticker.stop();
     _hazards.clear();
     _spawnClock = 0;
+    _shield.reset();
+    _shieldPickup = null;
+    _shieldSpawnClock = 0;
     _lastTick = Duration.zero;
     setState(() => _state = RunState.ready);
     _audio.setGameState(AudioRunState.menu);
@@ -625,16 +810,24 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                         key: _orbitCanvasKey,
                         width: side,
                         height: side,
-                        child: CustomPaint(
+                        child: KeyedSubtree(
                           key: ValueKey('orbit-lane-$_lane'),
-                          size: Size.square(side),
-                          painter: _OrbitPainter(
-                            angle: _angle,
-                            lane: _lane,
-                            orbitCount: _currentStage.orbitCount,
-                            hazards: List.of(_hazards),
-                            gemAngle: _gemAngle,
-                            gemLane: _gemLane,
+                          child: CustomPaint(
+                            key: _shield.isActive
+                                ? const ValueKey('shield-aura-visible')
+                                : null,
+                            size: Size.square(side),
+                            painter: _OrbitPainter(
+                              angle: _angle,
+                              lane: _lane,
+                              orbitCount: _currentStage.orbitCount,
+                              hazards: List.of(_hazards),
+                              gemAngle: _gemAngle,
+                              gemLane: _gemLane,
+                              shieldAngle: _shieldPickup?.angle,
+                              shieldLane: _shieldPickup?.lane,
+                              shieldActive: _shield.isActive,
+                            ),
                           ),
                         ),
                       ),
@@ -1231,6 +1424,13 @@ class _Hazard {
   double relativeAngleTravel = 0;
 }
 
+class _ShieldPickup {
+  const _ShieldPickup(this.angle, this.lane);
+
+  final double angle;
+  final int lane;
+}
+
 class _Star {
   const _Star(this.x, this.y, this.radius, this.paint);
 
@@ -1260,10 +1460,16 @@ class _OrbitPainter extends CustomPainter {
     required this.hazards,
     required this.gemAngle,
     required this.gemLane,
+    required this.shieldAngle,
+    required this.shieldLane,
+    required this.shieldActive,
   });
   final double angle, gemAngle;
   final int lane, gemLane, orbitCount;
   final List<_Hazard> hazards;
+  final double? shieldAngle;
+  final int? shieldLane;
+  final bool shieldActive;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1317,6 +1523,9 @@ class _OrbitPainter extends CustomPainter {
     }
     _orbitMarkers(canvas, center, geometry.radii);
     _planet(canvas, center, radius * (orbitCount == 2 ? .40 : .10));
+    if (shieldActive) {
+      _shieldAura(canvas, center, geometry.radiusForLane(lane), angle);
+    }
     _orbitalThing(
       canvas,
       center,
@@ -1339,6 +1548,65 @@ class _OrbitPainter extends CustomPainter {
       );
     }
     _gem(canvas, center, geometry.radiusForLane(gemLane), gemAngle);
+    if (shieldAngle != null && shieldLane != null) {
+      _shieldPickup(
+        canvas,
+        center,
+        geometry.radiusForLane(shieldLane!),
+        shieldAngle!,
+      );
+    }
+  }
+
+  void _shieldAura(Canvas canvas, Offset center, double radius, double a) {
+    final player = center + Offset(math.cos(a) * radius, math.sin(a) * radius);
+    canvas.drawCircle(
+      player,
+      15,
+      Paint()
+        ..color = const Color(0xff45eaff).withValues(alpha: .46)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.2,
+    );
+    canvas.drawCircle(
+      player,
+      19,
+      Paint()
+        ..color = const Color(0xff8c77ff).withValues(alpha: .32)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1,
+    );
+  }
+
+  void _shieldPickup(Canvas canvas, Offset center, double radius, double a) {
+    final p = center + Offset(math.cos(a) * radius, math.sin(a) * radius);
+    canvas.drawCircle(
+      p,
+      14,
+      Paint()..color = const Color(0xff53edff).withValues(alpha: .2),
+    );
+    final shieldPath = Path()
+      ..moveTo(p.dx, p.dy - 9)
+      ..lineTo(p.dx + 7, p.dy - 6)
+      ..lineTo(p.dx + 6, p.dy + 2)
+      ..quadraticBezierTo(p.dx + 4, p.dy + 7, p.dx, p.dy + 9)
+      ..quadraticBezierTo(p.dx - 4, p.dy + 7, p.dx - 6, p.dy + 2)
+      ..lineTo(p.dx - 7, p.dy - 6)
+      ..close();
+    canvas.drawPath(
+      shieldPath,
+      Paint()
+        ..shader = const LinearGradient(
+          colors: [Color(0xffc5fbff), Color(0xff31aaff), Color(0xff715cff)],
+        ).createShader(Rect.fromCenter(center: p, width: 16, height: 20)),
+    );
+    canvas.drawPath(
+      shieldPath,
+      Paint()
+        ..color = const Color(0xffe7ffff)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1,
+    );
   }
 
   void _orbitMarkers(Canvas canvas, Offset center, List<double> radii) {

@@ -62,6 +62,184 @@ void main() {
     });
   });
 
+  group('temporary shield', () {
+    test('activates for five seconds and expires without a collision', () {
+      final shield = TemporaryShield();
+      expect(shield.activate(), isTrue);
+      expect(shield.isActive, isTrue);
+      expect(shield.remaining, const Duration(seconds: 5));
+
+      shield.advance(const Duration(seconds: 4));
+      expect(shield.isActive, isTrue);
+      expect(shield.remaining, const Duration(seconds: 1));
+      shield.advance(const Duration(seconds: 1));
+      expect(shield.isActive, isFalse);
+      expect(shield.remaining, Duration.zero);
+    });
+
+    test('does not extend an active shield and absorbs only one collision', () {
+      final shield = TemporaryShield();
+      expect(shield.activate(), isTrue);
+      shield.advance(const Duration(seconds: 2));
+      expect(shield.activate(), isFalse);
+      expect(shield.remaining, const Duration(seconds: 3));
+
+      expect(
+        shieldCollisionResponse(shield, collision: true),
+        ShieldCollisionResponse.absorbed,
+      );
+      expect(shield.isActive, isFalse);
+      expect(
+        shieldCollisionResponse(shield, collision: true),
+        ShieldCollisionResponse.fatal,
+      );
+    });
+
+    test('a non-collision leaves the remaining shield duration unchanged', () {
+      final shield = TemporaryShield()..activate();
+      shield.advance(const Duration(seconds: 2));
+      expect(
+        shieldCollisionResponse(shield, collision: false),
+        ShieldCollisionResponse.noCollision,
+      );
+      expect(shield.isActive, isTrue);
+      expect(shield.remaining, const Duration(seconds: 3));
+    });
+    test('pickup uses the same lane and angular collection rules as gems', () {
+      expect(
+        shouldCollectShield(
+          playerLane: 2,
+          shieldLane: 2,
+          playerAngle: 0,
+          shieldAngle: .1,
+        ),
+        isTrue,
+      );
+      expect(
+        shouldCollectShield(
+          playerLane: 2,
+          shieldLane: 3,
+          playerAngle: 0,
+          shieldAngle: .01,
+        ),
+        isFalse,
+      );
+      expect(
+        shouldCollectShield(
+          playerLane: 2,
+          shieldLane: 2,
+          playerAngle: 0,
+          shieldAngle: .13,
+        ),
+        isFalse,
+      );
+    });
+  });
+  group('temporary shield game integration', () {
+    testWidgets('pickup activates the rendered aura without scoring', (
+      tester,
+    ) async {
+      SharedPreferences.setMockInitialValues({});
+      final driver = await _startShieldGame(tester);
+      driver.placeShieldAtPlayer();
+      await tester.pump(const Duration(milliseconds: 16));
+
+      expect(driver.shieldActive, isTrue);
+      expect(find.byKey(const ValueKey('shield-aura-visible')), findsOneWidget);
+      expect(driver.score, 0);
+      expect(driver.runState, RunState.playing);
+      expect(await StageProgressStore().loadUnlockedStage(), 1);
+
+      driver.placeGemAtPlayer();
+      await tester.pump(const Duration(milliseconds: 16));
+      expect(driver.shieldActive, isTrue);
+      expect(driver.score, 1);
+      expect(await StageProgressStore().loadUnlockedStage(), 1);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+
+    testWidgets(
+      'absorbs and removes one hazard, then the next hit ends the run',
+      (tester) async {
+        final driver = await _startShieldGame(tester);
+        driver.placeShieldAtPlayer();
+        await tester.pump(const Duration(milliseconds: 16));
+        expect(driver.shieldActive, isTrue);
+
+        driver.placeHazardAtPlayer();
+        await tester.pump(const Duration(milliseconds: 16));
+        expect(driver.runState, RunState.playing);
+        expect(driver.shieldActive, isFalse);
+        expect(driver.hazardCount, 0);
+        expect(find.text('STAGE FAILED'), findsNothing);
+
+        driver.placeHazardAtPlayer();
+        await tester.pump(const Duration(milliseconds: 16));
+        expect(driver.runState, RunState.over);
+        expect(find.text('STAGE FAILED'), findsOneWidget);
+
+        await tester.tap(find.text('RETRY STAGE'));
+        await tester.pump();
+        expect(driver.runState, RunState.playing);
+        expect(driver.shieldActive, isFalse);
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
+
+    testWidgets('expires after five seconds and restores fatal collisions', (
+      tester,
+    ) async {
+      final driver = await _startShieldGame(tester);
+      driver.placeShieldAtPlayer();
+      await tester.pump(const Duration(milliseconds: 16));
+      expect(driver.shieldActive, isTrue);
+
+      for (var frame = 0; frame < 120 && driver.shieldActive; frame++) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      expect(driver.shieldActive, isFalse);
+      expect(find.byKey(const ValueKey('shield-aura-visible')), findsNothing);
+      expect(driver.runState, RunState.playing);
+      expect(driver.score, 0);
+
+      driver.placeHazardAtPlayer();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(driver.runState, RunState.over);
+      expect(find.text('STAGE FAILED'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+
+    testWidgets(
+      'freezes the remaining duration during pause, then resumes it',
+      (tester) async {
+        final driver = await _startShieldGame(tester);
+        driver.placeShieldAtPlayer();
+        await tester.pump(const Duration(milliseconds: 16));
+        expect(driver.shieldActive, isTrue);
+        final remainingAtPause = driver.shieldRemaining;
+
+        await tester.tap(find.byTooltip('Pause'));
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 20));
+        expect(driver.runState, RunState.paused);
+        expect(driver.shieldRemaining, remainingAtPause);
+        expect(
+          find.byKey(const ValueKey('shield-aura-visible')),
+          findsOneWidget,
+        );
+
+        await tester.tap(find.text('RESUME'));
+        await tester.pump();
+        for (var frame = 0; frame < 10; frame++) {
+          await tester.pump(const Duration(milliseconds: 50));
+        }
+        expect(driver.runState, RunState.playing);
+        expect(driver.shieldActive, isTrue);
+        expect(driver.shieldRemaining, lessThan(remainingAtPause));
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
+  });
   group('hazard cleanup', () {
     test(
       'keeps a hazard near alignment and expires it after a full relative turn',
@@ -683,6 +861,34 @@ void main() {
     expect(audio.states.last, AudioRunState.menu);
     await tester.pumpWidget(const SizedBox.shrink());
   });
+}
+
+Future<OrbitGameTestDriver> _startShieldGame(WidgetTester tester) async {
+  final driver = OrbitGameTestDriver();
+  const stages = [
+    StageDefinition(
+      number: 1,
+      name: 'Shield Test',
+      targetScore: 50,
+      orbitCount: 2,
+    ),
+  ];
+  await tester.pumpWidget(
+    MaterialApp(
+      home: OrbitGamePage(
+        audioController: _TestAudioController(),
+        stages: stages,
+        testDriver: driver,
+      ),
+    ),
+  );
+  await tester.tap(find.text('START RUN'));
+  await tester.pump();
+  await _tapOrbitLane(tester, 1, 2);
+  driver.moveGemAwayFromPlayer();
+  await tester.pump(const Duration(milliseconds: 16));
+  expect(driver.runState, RunState.playing);
+  return driver;
 }
 
 OrbitDashApp _testApp() =>
