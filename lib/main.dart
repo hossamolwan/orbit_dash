@@ -3,6 +3,8 @@ import 'dart:math' as math;
 
 import 'package:orbit_dash/achievements.dart';
 import 'package:orbit_dash/audio/game_audio_manager.dart';
+import 'package:orbit_dash/player_statistics.dart';
+import 'package:orbit_dash/skins.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -35,6 +37,8 @@ enum RunState {
   stageComplete,
   gameComplete,
   achievements,
+  skins,
+  statistics,
 }
 
 /// Deterministic controls and observations for game-cycle widget tests.
@@ -55,6 +59,13 @@ class OrbitGameTestDriver {
   late int Function() _readTotalGems;
   late bool Function(AchievementId id) _readAchievementUnlocked;
   late Future<void> Function() _flushAchievements;
+  late int Function() _readRunsStarted;
+  late int Function() _readDistinctStagesCompleted;
+  late int Function() _readShieldAbsorptions;
+  late int Function() _readLosses;
+  late ShipSkinId Function() _readSelectedSkin;
+  late bool Function(ShipSkinId id) _readSkinUnlocked;
+  late Future<void> Function() _flushProgress;
 
   bool get shieldActive => _readShieldActive();
   Duration get shieldRemaining => _readShieldRemaining();
@@ -64,6 +75,13 @@ class OrbitGameTestDriver {
   int get totalGems => _readTotalGems();
   bool achievementUnlocked(AchievementId id) => _readAchievementUnlocked(id);
   Future<void> flushAchievements() => _flushAchievements();
+  int get runsStarted => _readRunsStarted();
+  int get distinctStagesCompleted => _readDistinctStagesCompleted();
+  int get shieldAbsorptions => _readShieldAbsorptions();
+  int get losses => _readLosses();
+  ShipSkinId get selectedSkin => _readSelectedSkin();
+  bool skinUnlocked(ShipSkinId id) => _readSkinUnlocked(id);
+  Future<void> flushProgress() => _flushProgress();
 
   void placeShieldAtPlayer() => _placeShieldAtPlayer();
   void placeHazardAtPlayer() => _placeHazardAtPlayer();
@@ -83,6 +101,13 @@ class OrbitGameTestDriver {
     required int Function() readTotalGems,
     required bool Function(AchievementId id) readAchievementUnlocked,
     required Future<void> Function() flushAchievements,
+    required int Function() readRunsStarted,
+    required int Function() readDistinctStagesCompleted,
+    required int Function() readShieldAbsorptions,
+    required int Function() readLosses,
+    required ShipSkinId Function() readSelectedSkin,
+    required bool Function(ShipSkinId id) readSkinUnlocked,
+    required Future<void> Function() flushProgress,
   }) {
     _placeShieldAtPlayer = placeShieldAtPlayer;
     _placeHazardAtPlayer = placeHazardAtPlayer;
@@ -96,6 +121,13 @@ class OrbitGameTestDriver {
     _readTotalGems = readTotalGems;
     _readAchievementUnlocked = readAchievementUnlocked;
     _flushAchievements = flushAchievements;
+    _readRunsStarted = readRunsStarted;
+    _readDistinctStagesCompleted = readDistinctStagesCompleted;
+    _readShieldAbsorptions = readShieldAbsorptions;
+    _readLosses = readLosses;
+    _readSelectedSkin = readSelectedSkin;
+    _readSkinUnlocked = readSkinUnlocked;
+    _flushProgress = flushProgress;
   }
 }
 
@@ -379,10 +411,16 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   int _highestUnlockedStage = 1;
   bool _stageProgressLoaded = false;
   final StageProgressStore _stageProgressStore = StageProgressStore();
+  final PlayerStatisticsStore _statisticsStore = PlayerStatisticsStore();
+  final SkinStore _skinStore = SkinStore();
+  bool _featureStoresLoaded = false;
+  bool _featureStoreLoadFailed = false;
+  late Future<void> _featureStoresReady;
   late final AchievementStore _achievementStore = AchievementStore(
     loadPreferences: widget.testDriver?.achievementPreferencesLoader,
   );
   Future<void> _achievementUpdates = Future<void>.value();
+  Future<void> _pendingFeatureWrites = Future<void>.value();
   bool _achievementsLoaded = false;
   bool _achievementsLoadFailed = false;
   bool _achievementsLoading = false;
@@ -438,12 +476,61 @@ class _OrbitGamePageState extends State<OrbitGamePage>
       readTotalGems: () => _achievementStore.totalGems,
       readAchievementUnlocked: _achievementStore.isUnlocked,
       flushAchievements: _flushAchievements,
+      readRunsStarted: () => _statisticsStore.runsStarted,
+      readDistinctStagesCompleted: () =>
+          _statisticsStore.distinctStagesCompleted,
+      readShieldAbsorptions: () => _statisticsStore.shieldAbsorptions,
+      readLosses: () => _statisticsStore.losses,
+      readSelectedSkin: () => _skinStore.selectedSkin,
+      readSkinUnlocked: _skinStore.isUnlocked,
+      flushProgress: _flushProgress,
     );
-    unawaited(_loadAchievements());
-    unawaited(_loadStageProgress());
+    _featureStoresReady = _loadFeatureStores();
+    unawaited(_featureStoresReady);
     SharedPreferences.getInstance().then((prefs) {
       if (mounted) setState(() => _best = prefs.getInt('orbit_dash_best') ?? 0);
     });
+  }
+
+  Future<void> _loadFeatureStores() async {
+    await _loadAchievements();
+    await _loadStageProgress();
+    try {
+      if (!_achievementsLoaded) {
+        throw StateError('Lifetime gem progress is unavailable.');
+      }
+      await _statisticsStore.load(highestUnlockedStage: _highestUnlockedStage);
+      await _skinStore.load(
+        lifetimeGems: _achievementStore.totalGems,
+        completedStages: _statisticsStore.completedStages,
+      );
+      if (mounted) {
+        setState(() {
+          _featureStoresLoaded = true;
+          _featureStoreLoadFailed = false;
+        });
+      }
+    } catch (error) {
+      debugPrint('Failed to load skin and statistics progress: $error');
+      if (mounted) setState(() => _featureStoreLoadFailed = true);
+    }
+  }
+
+  void _retryFeatureStores() {
+    _featureStoresReady = _loadFeatureStores();
+    unawaited(_featureStoresReady);
+  }
+
+  Future<void> _flushProgress() async {
+    await _featureStoresReady;
+    await _flushAchievements();
+    await _pendingFeatureWrites;
+    await _statisticsStore.flush();
+    await _skinStore.flush();
+  }
+
+  void _queueFeatureWrite(Future<void> Function() write) {
+    _pendingFeatureWrites = _pendingFeatureWrites.then((_) => write());
   }
 
   Future<void> _loadStageProgress() async {
@@ -596,6 +683,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
         if (collisionResponse != ShieldCollisionResponse.noCollision) {
           if (collisionResponse == ShieldCollisionResponse.absorbed) {
             absorbedHazards.add(hazard);
+            _queueFeatureWrite(_recordShieldAbsorption);
             _queueAchievementUpdate(
               _achievementStore.unlock(AchievementId.savedByShield),
             );
@@ -621,7 +709,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
         _audio.playEffect(GameSoundEffect.gemCollect);
         _gemAngle = (_angle + 2.4 + (_score % 3) * 0.45) % (math.pi * 2);
         _gemLane = nextOrbitLane(_gemLane, _currentStage.orbitCount);
-        _queueAchievementUpdate(_achievementStore.recordGem());
+        _queueAchievementUpdate(_recordGemProgress());
         if (_completionGate.completeIfReached(_score, _currentStage)) {
           _completeStage();
           return;
@@ -647,6 +735,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   }
 
   void _start({int? stageIndex}) {
+    if (_state == RunState.playing) return;
     final requestedStage = stageIndex ?? _currentStageIndex;
     if (requestedStage < 0 ||
         requestedStage >= widget.stages.length ||
@@ -674,6 +763,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     _ticker.start();
     _audio.setGameState(AudioRunState.playing);
     _audio.playEffect(GameSoundEffect.start);
+    _queueFeatureWrite(_recordRunStarted);
   }
 
   void _finish() {
@@ -685,6 +775,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     _audio.setGameState(AudioRunState.over);
     _audio.playEffect(GameSoundEffect.collision);
     _saveBestScore();
+    _queueFeatureWrite(_recordLoss);
   }
 
   void _completeStage() {
@@ -698,6 +789,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     _ticker.stop();
     _audio.setGameState(AudioRunState.over);
     _saveBestScore();
+    _queueFeatureWrite(() => _recordStageCompletion(_currentStage.number));
     final nextStage = _currentStageIndex + 1 < widget.stages.length
         ? widget.stages[_currentStageIndex + 1].number
         : null;
@@ -731,6 +823,61 @@ class _OrbitGamePageState extends State<OrbitGamePage>
         (prefs) => prefs.setInt('orbit_dash_best', _best),
       ),
     );
+  }
+
+  Future<List<AchievementId>> _recordGemProgress() async {
+    final newlyUnlocked = await _achievementStore.recordGem();
+    try {
+      await _skinStore.updateProgress(
+        lifetimeGems: _achievementStore.totalGems,
+        completedStages: _statisticsStore.completedStages,
+      );
+    } catch (error) {
+      debugPrint(
+        'Failed to update skin unlocks after collecting a gem: $error',
+      );
+    }
+    return newlyUnlocked;
+  }
+
+  Future<void> _recordRunStarted() async {
+    try {
+      await _statisticsStore.recordRunStarted();
+      if (mounted) setState(() {});
+    } catch (error) {
+      debugPrint('Failed to save started-run statistic: $error');
+    }
+  }
+
+  Future<void> _recordShieldAbsorption() async {
+    try {
+      await _statisticsStore.recordShieldAbsorption();
+      if (mounted) setState(() {});
+    } catch (error) {
+      debugPrint('Failed to save shield statistic: $error');
+    }
+  }
+
+  Future<void> _recordLoss() async {
+    try {
+      await _statisticsStore.recordLoss();
+      if (mounted) setState(() {});
+    } catch (error) {
+      debugPrint('Failed to save loss statistic: $error');
+    }
+  }
+
+  Future<void> _recordStageCompletion(int stage) async {
+    try {
+      await _statisticsStore.recordStageCompleted(stage);
+      await _skinStore.updateProgress(
+        lifetimeGems: _achievementStore.totalGems,
+        completedStages: _statisticsStore.completedStages,
+      );
+      if (mounted) setState(() {});
+    } catch (error) {
+      debugPrint('Failed to save stage completion statistic: $error');
+    }
   }
 
   Future<void> _continueToNextStage() async {
@@ -792,6 +939,26 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     _audio.setGameState(AudioRunState.menu);
   }
 
+  void _openSkins() {
+    setState(() => _state = RunState.skins);
+    _audio.setGameState(AudioRunState.menu);
+  }
+
+  void _openStatistics() {
+    setState(() => _state = RunState.statistics);
+    _audio.setGameState(AudioRunState.menu);
+  }
+
+  Future<void> _selectSkin(ShipSkinId id) async {
+    if (!_skinStore.isUnlocked(id)) return;
+    try {
+      final selected = await _skinStore.select(id);
+      if (selected && mounted) setState(() {});
+    } catch (error) {
+      debugPrint('Failed to save selected ship skin: $error');
+    }
+  }
+
   void _tapGame(Offset globalPosition) {
     if (_state == RunState.playing) {
       final canvas =
@@ -814,7 +981,9 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     // The ready overlay is the app's actual start/menu screen.
     RunState.ready ||
     RunState.selectingStage ||
-    RunState.achievements => AudioRunState.menu,
+    RunState.achievements ||
+    RunState.skins ||
+    RunState.statistics => AudioRunState.menu,
     RunState.playing => AudioRunState.playing,
     RunState.paused => AudioRunState.paused,
     RunState.over ||
@@ -886,6 +1055,26 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                           color: Color(0xffffd66e),
                         ),
                       ),
+                    if (_state == RunState.ready) ...[
+                      IconButton(
+                        onPressed: _openSkins,
+                        tooltip: 'Ship skins',
+                        visualDensity: VisualDensity.compact,
+                        icon: Icon(
+                          Icons.palette_rounded,
+                          color: _skinColor(_skinStore.selectedSkin),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: _openStatistics,
+                        tooltip: 'Player statistics',
+                        visualDensity: VisualDensity.compact,
+                        icon: const Icon(
+                          Icons.query_stats_rounded,
+                          color: Color(0xff65eaff),
+                        ),
+                      ),
+                    ],
                     if (_state != RunState.playing &&
                         constraints.maxWidth >= 400) ...[
                       IconButton(
@@ -961,6 +1150,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                               shieldAngle: _shieldPickup?.angle,
                               shieldLane: _shieldPickup?.lane,
                               shieldActive: _shield.isActive,
+                              playerSkin: _skinStore.selectedSkin,
                             ),
                           ),
                         ),
@@ -1123,6 +1313,18 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     }
     if (_state == RunState.achievements) {
       return _achievementContent(
+        compact: compact,
+        showAudioControls: showAudioControls,
+      );
+    }
+    if (_state == RunState.skins) {
+      return _skinsContent(
+        compact: compact,
+        showAudioControls: showAudioControls,
+      );
+    }
+    if (_state == RunState.statistics) {
+      return _statisticsContent(
         compact: compact,
         showAudioControls: showAudioControls,
       );
@@ -1468,6 +1670,224 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     );
   }
 
+  Widget _skinsContent({
+    required bool compact,
+    required bool showAudioControls,
+  }) => Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(
+        Icons.palette_rounded,
+        color: _skinColor(_skinStore.selectedSkin),
+        size: 32,
+      ),
+      SizedBox(height: compact ? 7 : 10),
+      Text(
+        'SHIP SKINS',
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: compact ? 16 : 18,
+          letterSpacing: 2,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+      const SizedBox(height: 5),
+      const Text(
+        'Choose a look. Every skin plays the same.',
+        textAlign: TextAlign.center,
+        style: TextStyle(color: Color(0xffaebbd2), fontSize: 11),
+      ),
+      SizedBox(height: compact ? 9 : 12),
+      if (!_featureStoresLoaded)
+        _progressStoreMessage()
+      else
+        for (final skin in shipSkins) _skinOption(skin),
+      if (showAudioControls) ...[
+        SizedBox(height: compact ? 5 : 8),
+        _audioSettingsRow(),
+      ],
+      SizedBox(height: compact ? 8 : 12),
+      _secondaryButton(
+        label: 'MAIN MENU',
+        icon: Icons.home_rounded,
+        onPressed: _returnToMenu,
+      ),
+    ],
+  );
+
+  Widget _skinOption(ShipSkin skin) {
+    final unlocked = _skinStore.isUnlocked(skin.id);
+    final selected = _skinStore.selectedSkin == skin.id;
+    final requirement = skin.gemRequirement != null
+        ? 'Collect ${skin.gemRequirement} lifetime gems'
+        : skin.stageRequirement != null
+        ? 'Complete Stage ${skin.stageRequirement}'
+        : 'Available from the start';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: SizedBox(
+        width: double.infinity,
+        height: 58,
+        child: OutlinedButton(
+          key: ValueKey('skin-option-${skin.id.name}'),
+          onPressed: unlocked ? () => unawaited(_selectSkin(skin.id)) : null,
+          style: OutlinedButton.styleFrom(
+            alignment: Alignment.centerLeft,
+            padding: const EdgeInsets.symmetric(horizontal: 11),
+            foregroundColor: Colors.white,
+            disabledForegroundColor: Colors.white38,
+            side: BorderSide(
+              color: selected
+                  ? _skinColor(skin.id).withValues(alpha: .7)
+                  : const Color(0x337d8ba5),
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                unlocked ? _skinIcon(skin.id) : Icons.lock_outline,
+                color: unlocked ? _skinColor(skin.id) : Colors.white38,
+                size: 20,
+              ),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      skin.name,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    Text(
+                      requirement,
+                      style: const TextStyle(
+                        color: Color(0xff9baac3),
+                        fontSize: 9,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Text(
+                selected
+                    ? 'SELECTED'
+                    : unlocked
+                    ? 'SELECT'
+                    : 'LOCKED',
+                style: TextStyle(
+                  color: selected ? _skinColor(skin.id) : Colors.white54,
+                  fontSize: 8,
+                  letterSpacing: .5,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _statisticsContent({
+    required bool compact,
+    required bool showAudioControls,
+  }) => Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(Icons.query_stats_rounded, color: const Color(0xff65eaff), size: 32),
+      SizedBox(height: compact ? 7 : 10),
+      Text(
+        'PLAYER STATISTICS',
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: compact ? 16 : 18,
+          letterSpacing: 2,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+      SizedBox(height: compact ? 9 : 12),
+      if (!_featureStoresLoaded)
+        _progressStoreMessage()
+      else ...[
+        _resultCard(
+          label: 'LIFETIME GEMS',
+          value: '${_achievementStore.totalGems}',
+        ),
+        const SizedBox(height: 6),
+        _resultCard(label: 'BEST SCORE', value: '$_best'),
+        const SizedBox(height: 6),
+        _resultCard(
+          label: 'RUNS STARTED',
+          value: '${_statisticsStore.runsStarted}',
+        ),
+        const SizedBox(height: 6),
+        _resultCard(
+          label: 'DISTINCT STAGES COMPLETED',
+          value: '${_statisticsStore.distinctStagesCompleted}',
+        ),
+        const SizedBox(height: 6),
+        _resultCard(
+          label: 'SHIELD COLLISIONS ABSORBED',
+          value: '${_statisticsStore.shieldAbsorptions}',
+        ),
+        const SizedBox(height: 6),
+        _resultCard(label: 'LOSSES', value: '${_statisticsStore.losses}'),
+      ],
+      if (showAudioControls) ...[
+        SizedBox(height: compact ? 5 : 8),
+        _audioSettingsRow(),
+      ],
+      SizedBox(height: compact ? 8 : 12),
+      _secondaryButton(
+        label: 'MAIN MENU',
+        icon: Icons.home_rounded,
+        onPressed: _returnToMenu,
+      ),
+    ],
+  );
+
+  IconData _skinIcon(ShipSkinId id) => switch (id) {
+    ShipSkinId.defaultSkin => Icons.blur_circular_rounded,
+    ShipSkinId.emerald => Icons.diamond_rounded,
+    ShipSkinId.nebula => Icons.auto_awesome_rounded,
+    ShipSkinId.solar => Icons.wb_sunny_rounded,
+    ShipSkinId.supernova => Icons.flare_rounded,
+  };
+
+  Widget _progressStoreMessage() => Column(
+    children: [
+      Text(
+        _featureStoreLoadFailed
+            ? 'Could not load saved progress. Existing data was left unchanged.'
+            : 'Loading saved progress…',
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          color: _featureStoreLoadFailed
+              ? const Color(0xffffb4a9)
+              : const Color(0xffaebbd2),
+          fontSize: 11,
+        ),
+      ),
+      if (_featureStoreLoadFailed) ...[
+        const SizedBox(height: 8),
+        _secondaryButton(
+          label: 'RETRY',
+          icon: Icons.refresh_rounded,
+          onPressed: _retryFeatureStores,
+        ),
+      ],
+    ],
+  );
+
   Widget _stageSelectionContent({
     required bool compact,
     required bool showAudioControls,
@@ -1753,6 +2173,7 @@ class _OrbitPainter extends CustomPainter {
     required this.shieldAngle,
     required this.shieldLane,
     required this.shieldActive,
+    required this.playerSkin,
   });
   final double angle, gemAngle;
   final int lane, gemLane, orbitCount;
@@ -1760,6 +2181,7 @@ class _OrbitPainter extends CustomPainter {
   final double? shieldAngle;
   final int? shieldLane;
   final bool shieldActive;
+  final ShipSkinId playerSkin;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1816,16 +2238,7 @@ class _OrbitPainter extends CustomPainter {
     if (shieldActive) {
       _shieldAura(canvas, center, geometry.radiusForLane(lane), angle);
     }
-    _orbitalThing(
-      canvas,
-      center,
-      geometry.radiusForLane(lane),
-      angle,
-      const Color(0xff60efff),
-      8,
-      glow: true,
-      trail: true,
-    );
+    _playerShip(canvas, center, geometry.radiusForLane(lane), angle);
     for (final hazard in hazards) {
       _orbitalThing(
         canvas,
@@ -2083,6 +2496,86 @@ class _OrbitPainter extends CustomPainter {
     );
   }
 
+  void _playerShip(Canvas canvas, Offset center, double radius, double angle) {
+    final position =
+        center + Offset(math.cos(angle) * radius, math.sin(angle) * radius);
+    final color = _skinColor(playerSkin);
+    for (var i = 3; i >= 1; i--) {
+      final trailAngle = angle - i * .055;
+      final trailPoint =
+          center +
+          Offset(math.cos(trailAngle) * radius, math.sin(trailAngle) * radius);
+      canvas.drawCircle(
+        trailPoint,
+        8 * (1 - i * .16),
+        Paint()..color = color.withValues(alpha: .10 + .06 * (3 - i)),
+      );
+    }
+    canvas.drawCircle(
+      position,
+      13.2,
+      Paint()..color = color.withValues(alpha: .16),
+    );
+    final path = Path();
+    switch (playerSkin) {
+      case ShipSkinId.defaultSkin:
+        canvas.drawCircle(position, 8, Paint()..color = color);
+        break;
+      case ShipSkinId.emerald:
+        path
+          ..moveTo(position.dx, position.dy - 8)
+          ..lineTo(position.dx + 7, position.dy)
+          ..lineTo(position.dx, position.dy + 8)
+          ..lineTo(position.dx - 7, position.dy)
+          ..close();
+        canvas.drawPath(path, Paint()..color = color);
+        break;
+      case ShipSkinId.nebula:
+        canvas.drawCircle(
+          position,
+          7,
+          Paint()
+            ..color = color
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2.5,
+        );
+        canvas.drawCircle(position, 3, Paint()..color = color);
+        canvas.drawCircle(
+          position +
+              Offset(
+                math.cos(angle + math.pi / 2) * 6.5,
+                math.sin(angle + math.pi / 2) * 6.5,
+              ),
+          1.6,
+          Paint()..color = Colors.white,
+        );
+        break;
+      case ShipSkinId.solar:
+      case ShipSkinId.supernova:
+        final points = playerSkin == ShipSkinId.solar ? 8 : 10;
+        for (var i = 0; i < points; i++) {
+          final r = i.isEven
+              ? 8.0
+              : (playerSkin == ShipSkinId.solar ? 5.5 : 3.8);
+          final a = angle + i * math.pi / points - math.pi / 2;
+          final point = position + Offset(math.cos(a) * r, math.sin(a) * r);
+          if (i == 0) {
+            path.moveTo(point.dx, point.dy);
+          } else {
+            path.lineTo(point.dx, point.dy);
+          }
+        }
+        path.close();
+        canvas.drawPath(path, Paint()..color = color);
+        break;
+    }
+    canvas.drawCircle(
+      position,
+      2.8,
+      Paint()..color = Colors.white.withValues(alpha: .92),
+    );
+  }
+
   void _gem(Canvas c, Offset center, double r, double a) {
     final p = center + Offset(math.cos(a) * r, math.sin(a) * r);
     final color = const Color(0xffffd66e);
@@ -2111,3 +2604,11 @@ class _OrbitPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _OrbitPainter oldDelegate) => true;
 }
+
+Color _skinColor(ShipSkinId skin) => switch (skin) {
+  ShipSkinId.defaultSkin => const Color(0xff60efff),
+  ShipSkinId.emerald => const Color(0xff66f0a5),
+  ShipSkinId.nebula => const Color(0xffbe86ff),
+  ShipSkinId.solar => const Color(0xffffb54d),
+  ShipSkinId.supernova => const Color(0xffff6fcf),
+};
