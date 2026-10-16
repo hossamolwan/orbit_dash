@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:orbit_dash/achievements.dart';
 import 'package:orbit_dash/audio/game_audio_manager.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -33,10 +34,15 @@ enum RunState {
   over,
   stageComplete,
   gameComplete,
+  achievements,
 }
 
 /// Deterministic controls and observations for game-cycle widget tests.
 class OrbitGameTestDriver {
+  OrbitGameTestDriver({this.achievementPreferencesLoader});
+
+  final Future<SharedPreferences> Function()? achievementPreferencesLoader;
+
   late void Function() _placeShieldAtPlayer;
   late void Function() _placeHazardAtPlayer;
   late void Function() _placeGemAtPlayer;
@@ -46,12 +52,18 @@ class OrbitGameTestDriver {
   late int Function() _readHazardCount;
   late int Function() _readScore;
   late RunState Function() _readRunState;
+  late int Function() _readTotalGems;
+  late bool Function(AchievementId id) _readAchievementUnlocked;
+  late Future<void> Function() _flushAchievements;
 
   bool get shieldActive => _readShieldActive();
   Duration get shieldRemaining => _readShieldRemaining();
   int get hazardCount => _readHazardCount();
   int get score => _readScore();
   RunState get runState => _readRunState();
+  int get totalGems => _readTotalGems();
+  bool achievementUnlocked(AchievementId id) => _readAchievementUnlocked(id);
+  Future<void> flushAchievements() => _flushAchievements();
 
   void placeShieldAtPlayer() => _placeShieldAtPlayer();
   void placeHazardAtPlayer() => _placeHazardAtPlayer();
@@ -68,6 +80,9 @@ class OrbitGameTestDriver {
     required int Function() readHazardCount,
     required int Function() readScore,
     required RunState Function() readRunState,
+    required int Function() readTotalGems,
+    required bool Function(AchievementId id) readAchievementUnlocked,
+    required Future<void> Function() flushAchievements,
   }) {
     _placeShieldAtPlayer = placeShieldAtPlayer;
     _placeHazardAtPlayer = placeHazardAtPlayer;
@@ -78,6 +93,9 @@ class OrbitGameTestDriver {
     _readHazardCount = readHazardCount;
     _readScore = readScore;
     _readRunState = readRunState;
+    _readTotalGems = readTotalGems;
+    _readAchievementUnlocked = readAchievementUnlocked;
+    _flushAchievements = flushAchievements;
   }
 }
 
@@ -361,6 +379,13 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   int _highestUnlockedStage = 1;
   bool _stageProgressLoaded = false;
   final StageProgressStore _stageProgressStore = StageProgressStore();
+  late final AchievementStore _achievementStore = AchievementStore(
+    loadPreferences: widget.testDriver?.achievementPreferencesLoader,
+  );
+  Future<void> _achievementUpdates = Future<void>.value();
+  bool _achievementsLoaded = false;
+  bool _achievementsLoadFailed = false;
+  bool _achievementsLoading = false;
   Future<void> _progressWrite = Future<void>.value();
   final StageCompletionGate _completionGate = StageCompletionGate();
   bool _completionHandled = false;
@@ -410,7 +435,11 @@ class _OrbitGamePageState extends State<OrbitGamePage>
       readHazardCount: () => _hazards.length,
       readScore: () => _score,
       readRunState: () => _state,
+      readTotalGems: () => _achievementStore.totalGems,
+      readAchievementUnlocked: _achievementStore.isUnlocked,
+      flushAchievements: _flushAchievements,
     );
+    unawaited(_loadAchievements());
     unawaited(_loadStageProgress());
     SharedPreferences.getInstance().then((prefs) {
       if (mounted) setState(() => _best = prefs.getInt('orbit_dash_best') ?? 0);
@@ -426,6 +455,80 @@ class _OrbitGamePageState extends State<OrbitGamePage>
           .toInt();
       _stageProgressLoaded = true;
     });
+    if (loadedStage >= 4) {
+      _queueAchievementUpdate(
+        _achievementStore.unlock(AchievementId.orbitExplorer),
+        notify: false,
+      );
+    }
+  }
+
+  Future<void> _loadAchievements() async {
+    if (_achievementsLoading || _achievementsLoaded) return;
+    _achievementsLoading = true;
+    try {
+      await _achievementStore.load();
+      if (mounted) {
+        setState(() {
+          _achievementsLoaded = true;
+          _achievementsLoadFailed = false;
+        });
+      }
+    } catch (error) {
+      debugPrint('Failed to load achievements: $error');
+      if (mounted) setState(() => _achievementsLoadFailed = true);
+    } finally {
+      _achievementsLoading = false;
+      if (mounted) setState(() {});
+    }
+  }
+
+  void _queueAchievementUpdate(
+    Future<List<AchievementId>> update, {
+    bool notify = true,
+  }) {
+    _achievementUpdates = _achievementUpdates.then((_) async {
+      try {
+        final newlyUnlocked = await update;
+        if (!mounted) return;
+        if (newlyUnlocked.isNotEmpty) setState(() {});
+        if (notify) {
+          for (final id in newlyUnlocked) {
+            _showAchievementNotice(id);
+          }
+        }
+      } catch (error) {
+        debugPrint('Failed to update achievements: $error');
+      }
+    });
+  }
+
+  Future<void> _flushAchievements() async {
+    await _achievementStore.flush();
+    await _achievementUpdates;
+  }
+
+  void _showAchievementNotice(AchievementId id) {
+    final definition = achievementDefinitions.firstWhere(
+      (achievement) => achievement.id == id,
+    );
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          key: ValueKey('achievement-notice-${id.name}'),
+          duration: const Duration(seconds: 3),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: const Color(0xff17243a),
+          content: Row(
+            children: [
+              const Icon(Icons.emoji_events_rounded, color: Color(0xffffd66e)),
+              const SizedBox(width: 10),
+              Expanded(child: Text('${definition.title} unlocked!')),
+            ],
+          ),
+        ),
+      );
   }
 
   @override
@@ -493,6 +596,9 @@ class _OrbitGamePageState extends State<OrbitGamePage>
         if (collisionResponse != ShieldCollisionResponse.noCollision) {
           if (collisionResponse == ShieldCollisionResponse.absorbed) {
             absorbedHazards.add(hazard);
+            _queueAchievementUpdate(
+              _achievementStore.unlock(AchievementId.savedByShield),
+            );
             continue;
           }
           _finish();
@@ -515,6 +621,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
         _audio.playEffect(GameSoundEffect.gemCollect);
         _gemAngle = (_angle + 2.4 + (_score % 3) * 0.45) % (math.pi * 2);
         _gemLane = nextOrbitLane(_gemLane, _currentStage.orbitCount);
+        _queueAchievementUpdate(_achievementStore.recordGem());
         if (_completionGate.completeIfReached(_score, _currentStage)) {
           _completeStage();
           return;
@@ -603,6 +710,16 @@ class _OrbitGamePageState extends State<OrbitGamePage>
         debugPrint('Failed to save stage progress: $error');
       });
       unawaited(_progressWrite);
+      if (nextStage == 4) {
+        _queueAchievementUpdate(
+          _achievementStore.unlock(AchievementId.orbitExplorer),
+        );
+      }
+    }
+    if (_currentStage.number == 5 && _state == RunState.gameComplete) {
+      _queueAchievementUpdate(
+        _achievementStore.unlock(AchievementId.orbitalMaster),
+      );
     }
   }
 
@@ -670,6 +787,11 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     _audio.setGameState(AudioRunState.menu);
   }
 
+  void _openAchievements() {
+    setState(() => _state = RunState.achievements);
+    _audio.setGameState(AudioRunState.menu);
+  }
+
   void _tapGame(Offset globalPosition) {
     if (_state == RunState.playing) {
       final canvas =
@@ -690,7 +812,9 @@ class _OrbitGamePageState extends State<OrbitGamePage>
 
   AudioRunState _audioStateFor(RunState state) => switch (state) {
     // The ready overlay is the app's actual start/menu screen.
-    RunState.ready || RunState.selectingStage => AudioRunState.menu,
+    RunState.ready ||
+    RunState.selectingStage ||
+    RunState.achievements => AudioRunState.menu,
     RunState.playing => AudioRunState.playing,
     RunState.paused => AudioRunState.paused,
     RunState.over ||
@@ -752,6 +876,16 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                         ),
                       ),
                     const Spacer(),
+                    if (_state == RunState.ready)
+                      IconButton(
+                        onPressed: _openAchievements,
+                        tooltip: 'Achievements',
+                        visualDensity: VisualDensity.compact,
+                        icon: const Icon(
+                          Icons.emoji_events_rounded,
+                          color: Color(0xffffd66e),
+                        ),
+                      ),
                     if (_state != RunState.playing &&
                         constraints.maxWidth >= 400) ...[
                       IconButton(
@@ -987,6 +1121,12 @@ class _OrbitGamePageState extends State<OrbitGamePage>
         showAudioControls: showAudioControls,
       );
     }
+    if (_state == RunState.achievements) {
+      return _achievementContent(
+        compact: compact,
+        showAudioControls: showAudioControls,
+      );
+    }
 
     final stage = _currentStage;
     final lost = _state == RunState.over;
@@ -1175,6 +1315,156 @@ class _OrbitGamePageState extends State<OrbitGamePage>
           ),
         ],
       ],
+    );
+  }
+
+  Widget _achievementContent({
+    required bool compact,
+    required bool showAudioControls,
+  }) => Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(
+        Icons.emoji_events_rounded,
+        color: const Color(0xffffd66e),
+        size: compact ? 30 : 36,
+      ),
+      SizedBox(height: compact ? 7 : 10),
+      Text(
+        'ACHIEVEMENTS',
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: compact ? 16 : 18,
+          letterSpacing: 2,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+      const SizedBox(height: 5),
+      if (_achievementsLoaded) ...[
+        Text(
+          'Total gems: ${_achievementStore.totalGems}',
+          style: const TextStyle(color: Color(0xffaebbd2), fontSize: 12),
+        ),
+        SizedBox(height: compact ? 9 : 13),
+        for (final achievement in achievementDefinitions)
+          _achievementRow(achievement),
+      ] else if (_achievementsLoadFailed) ...[
+        const SizedBox(height: 7),
+        const Text(
+          'Could not load saved achievements. Your saved progress is unchanged.',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Color(0xffffb4a9), fontSize: 12),
+        ),
+        SizedBox(height: compact ? 9 : 13),
+        _secondaryButton(
+          label: 'RETRY',
+          icon: Icons.refresh_rounded,
+          onPressed: () => unawaited(_loadAchievements()),
+        ),
+      ] else
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: 16),
+          child: Text(
+            'Loading saved progress…',
+            style: TextStyle(color: Color(0xffaebbd2), fontSize: 12),
+          ),
+        ),
+      if (showAudioControls) ...[
+        SizedBox(height: compact ? 5 : 8),
+        _audioSettingsRow(),
+      ],
+      SizedBox(height: compact ? 8 : 12),
+      _secondaryButton(
+        label: 'MAIN MENU',
+        icon: Icons.home_rounded,
+        onPressed: _returnToMenu,
+      ),
+    ],
+  );
+
+  Widget _achievementRow(AchievementDefinition achievement) {
+    final unlocked = _achievementStore.isUnlocked(achievement.id);
+    final progress = switch (achievement.id) {
+      AchievementId.firstSteps || AchievementId.gemCollector =>
+        '${math.min(_achievementStore.totalGems, achievement.gemGoal!)}/${achievement.gemGoal} gems',
+      AchievementId.savedByShield =>
+        unlocked ? 'Shield absorbed a collision' : 'No collision absorbed yet',
+      AchievementId.orbitExplorer =>
+        '${math.min(_highestUnlockedStage, 4)}/4 stages unlocked',
+      AchievementId.orbitalMaster =>
+        unlocked ? 'Final stage completed' : 'Stage 5 not completed yet',
+    };
+    return Container(
+      key: ValueKey('achievement-${achievement.id.name}'),
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 7),
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+      decoration: BoxDecoration(
+        color: const Color(0xff151e33),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: unlocked ? const Color(0x6670e9ff) : const Color(0x337d8ba5),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            unlocked ? Icons.workspace_premium_rounded : Icons.lock_outline,
+            color: unlocked ? const Color(0xffffd66e) : Colors.white38,
+            size: 22,
+          ),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  achievement.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  achievement.description,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xff9baac3),
+                    fontSize: 9,
+                    height: 1.2,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  progress,
+                  style: const TextStyle(
+                    color: Color(0xff65eaff),
+                    fontSize: 9,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 7),
+          Text(
+            unlocked ? 'OPEN' : 'LOCKED',
+            key: ValueKey('achievement-status-${achievement.id.name}'),
+            style: TextStyle(
+              color: unlocked ? const Color(0xffffd66e) : Colors.white38,
+              fontSize: 8,
+              letterSpacing: .7,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
     );
   }
 

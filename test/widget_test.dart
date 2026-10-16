@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:orbit_dash/achievements.dart';
 import 'package:orbit_dash/audio/game_audio_manager.dart';
 import 'package:orbit_dash/main.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -62,6 +63,68 @@ void main() {
     });
   });
 
+  group('achievement persistence', () {
+    test('counts gems and unlocks both thresholds exactly once', () async {
+      SharedPreferences.setMockInitialValues({
+        'orbit_dash_best': 21,
+        StageProgressStore.preferenceKey: 3,
+      });
+      final store = AchievementStore();
+      await store.load();
+
+      for (var gem = 0; gem < 9; gem++) {
+        expect(await store.recordGem(), isEmpty);
+      }
+      expect(store.totalGems, 9);
+      expect(store.isUnlocked(AchievementId.firstSteps), isFalse);
+      expect(store.isUnlocked(AchievementId.gemCollector), isFalse);
+      expect(await store.recordGem(), [AchievementId.firstSteps]);
+      expect(store.isUnlocked(AchievementId.gemCollector), isFalse);
+
+      for (var gem = 10; gem < 49; gem++) {
+        expect(await store.recordGem(), isEmpty);
+      }
+      expect(store.totalGems, 49);
+      expect(store.isUnlocked(AchievementId.gemCollector), isFalse);
+      expect(await store.recordGem(), [AchievementId.gemCollector]);
+      expect(await store.recordGem(), isEmpty);
+      expect(store.totalGems, 51);
+
+      final preferences = await SharedPreferences.getInstance();
+      expect(preferences.getInt('orbit_dash_best'), 21);
+      expect(preferences.getInt(StageProgressStore.preferenceKey), 3);
+      expect(
+        preferences.getBool(
+          AchievementStore.preferenceKeyFor(AchievementId.firstSteps),
+        ),
+        isTrue,
+      );
+      expect(
+        preferences.getBool(
+          AchievementStore.preferenceKeyFor(AchievementId.gemCollector),
+        ),
+        isTrue,
+      );
+
+      final restored = AchievementStore();
+      await restored.load();
+      expect(restored.totalGems, 51);
+      expect(restored.isUnlocked(AchievementId.firstSteps), isTrue);
+      expect(restored.isUnlocked(AchievementId.gemCollector), isTrue);
+    });
+
+    test('keeps achievement flags independent and idempotent', () async {
+      SharedPreferences.setMockInitialValues({});
+      final store = AchievementStore();
+      await store.load();
+      expect(await store.unlock(AchievementId.savedByShield), [
+        AchievementId.savedByShield,
+      ]);
+      expect(await store.unlock(AchievementId.savedByShield), isEmpty);
+      expect(store.isUnlocked(AchievementId.firstSteps), isFalse);
+      expect(store.isUnlocked(AchievementId.orbitExplorer), isFalse);
+    });
+  });
   group('temporary shield', () {
     test('activates for five seconds and expires without a collision', () {
       final shield = TemporaryShield();
@@ -145,6 +208,8 @@ void main() {
       await tester.pump(const Duration(milliseconds: 16));
 
       expect(driver.shieldActive, isTrue);
+      await driver.flushAchievements();
+      expect(driver.achievementUnlocked(AchievementId.savedByShield), isFalse);
       expect(find.byKey(const ValueKey('shield-aura-visible')), findsOneWidget);
       expect(driver.score, 0);
       expect(driver.runState, RunState.playing);
@@ -171,6 +236,8 @@ void main() {
         expect(driver.runState, RunState.playing);
         expect(driver.shieldActive, isFalse);
         expect(driver.hazardCount, 0);
+        await driver.flushAchievements();
+        expect(driver.achievementUnlocked(AchievementId.savedByShield), isTrue);
         expect(find.text('STAGE FAILED'), findsNothing);
 
         driver.placeHazardAtPlayer();
@@ -544,6 +611,176 @@ void main() {
     expect(await store.loadUnlockedStage(), 1);
   });
 
+  testWidgets('persists gem progress across retry and a recreated game page', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({AchievementStore.totalGemsKey: 9});
+    final driver = await _startShieldGame(tester);
+    driver.placeGemAtPlayer();
+    await tester.pump(const Duration(milliseconds: 16));
+    await driver.flushAchievements();
+
+    expect(driver.score, 1);
+    expect(driver.totalGems, 10);
+    expect(driver.achievementUnlocked(AchievementId.firstSteps), isTrue);
+    expect(find.text('First Steps unlocked!'), findsOneWidget);
+
+    tester
+        .state<ScaffoldMessengerState>(find.byType(ScaffoldMessenger))
+        .hideCurrentSnackBar();
+    await tester.pump(const Duration(milliseconds: 400));
+    driver.placeGemAtPlayer();
+    await tester.pump(const Duration(milliseconds: 16));
+    await driver.flushAchievements();
+    expect(driver.totalGems, 11);
+    expect(find.text('First Steps unlocked!'), findsNothing);
+
+    await tester.tap(find.byTooltip('Pause'));
+    await tester.pump();
+    tester
+        .state<ScaffoldMessengerState>(find.byType(ScaffoldMessenger))
+        .clearSnackBars();
+    await tester.tap(find.text('RESTART STAGE'));
+    await tester.pump();
+    await driver.flushAchievements();
+    expect(driver.score, 0);
+    expect(driver.totalGems, 11);
+    expect(driver.achievementUnlocked(AchievementId.firstSteps), isTrue);
+    await tester.pumpWidget(const SizedBox.shrink());
+
+    await tester.pumpWidget(_testApp());
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Achievements'));
+    await tester.pumpAndSettle();
+    expect(find.text('Total gems: 11'), findsOneWidget);
+    expect(find.text('First Steps'), findsOneWidget);
+    expect(find.text('Gem Collector'), findsOneWidget);
+    expect(
+      tester
+          .widget<Text>(
+            find.byKey(const ValueKey('achievement-status-firstSteps')),
+          )
+          .data,
+      'OPEN',
+    );
+    expect(
+      tester
+          .widget<Text>(
+            find.byKey(const ValueKey('achievement-status-gemCollector')),
+          )
+          .data,
+      'LOCKED',
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('achievements screen fits a compact phone viewport', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(320, 568);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(_testApp());
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Achievements'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('ACHIEVEMENTS'), findsOneWidget);
+    for (final achievement in achievementDefinitions) {
+      expect(
+        find.byKey(ValueKey('achievement-${achievement.id.name}')),
+        findsOneWidget,
+      );
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(ValueKey('achievement-status-${achievement.id.name}')),
+            )
+            .data,
+        'LOCKED',
+      );
+      final card = tester.getRect(
+        find.byKey(ValueKey('achievement-${achievement.id.name}')),
+      );
+      expect(card.left, greaterThanOrEqualTo(0));
+      expect(card.right, lessThanOrEqualTo(320));
+    }
+    expect(tester.takeException(), isNull);
+
+    await tester.ensureVisible(find.text('MAIN MENU'));
+    await tester.pump();
+    expect(
+      tester.getRect(find.text('MAIN MENU')).bottom,
+      lessThanOrEqualTo(568),
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+  testWidgets('achievement load failure shows retry and restores saved data', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      AchievementStore.totalGemsKey: 14,
+      AchievementStore.preferenceKeyFor(AchievementId.firstSteps): true,
+      'orbit_dash_best': 12,
+    });
+    var loadAttempts = 0;
+    final driver = OrbitGameTestDriver(
+      achievementPreferencesLoader: () {
+        loadAttempts++;
+        if (loadAttempts == 1) {
+          throw StateError('Temporary preferences load failure');
+        }
+        return SharedPreferences.getInstance();
+      },
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(home: OrbitGamePage(testDriver: driver)),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Achievements'));
+    await tester.pumpAndSettle();
+
+    expect(loadAttempts, 1);
+    expect(
+      find.text(
+        'Could not load saved achievements. Your saved progress is unchanged.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Loading saved progress…'), findsNothing);
+    expect(find.text('Total gems: 14'), findsNothing);
+    expect(find.byKey(const ValueKey('achievement-firstSteps')), findsNothing);
+    expect(find.text('RETRY'), findsOneWidget);
+
+    final preferences = await SharedPreferences.getInstance();
+    expect(preferences.getInt(AchievementStore.totalGemsKey), 14);
+    expect(
+      preferences.getBool(
+        AchievementStore.preferenceKeyFor(AchievementId.firstSteps),
+      ),
+      isTrue,
+    );
+
+    await tester.tap(find.text('RETRY'));
+    await tester.pumpAndSettle();
+
+    expect(loadAttempts, 2);
+    expect(find.text('Could not load saved achievements.'), findsNothing);
+    expect(find.text('Total gems: 14'), findsOneWidget);
+    expect(find.byKey(const ValueKey('achievement-firstSteps')), findsOneWidget);
+    expect(
+      tester
+          .widget<Text>(
+            find.byKey(const ValueKey('achievement-status-firstSteps')),
+          )
+          .data,
+      'OPEN',
+    );
+    expect(preferences.getInt(AchievementStore.totalGemsKey), 14);
+  });
   testWidgets('stage picker only starts unlocked stages', (tester) async {
     await tester.pumpWidget(_testApp());
     await tester.pumpAndSettle();
@@ -602,11 +839,17 @@ void main() {
         ),
       ];
       final audio = _TestAudioController();
+      final driver = OrbitGameTestDriver();
       await tester.pumpWidget(
         MaterialApp(
-          home: OrbitGamePage(audioController: audio, stages: testStages),
+          home: OrbitGamePage(
+            audioController: audio,
+            stages: testStages,
+            testDriver: driver,
+          ),
         ),
       );
+      await driver.flushAchievements();
       await tester.tap(find.text('START RUN'));
       await tester.pump();
       await _tapOrbitLane(tester, 1, 2);
@@ -630,15 +873,36 @@ void main() {
         expect(find.textContaining('STAGE $stageNumber'), findsOneWidget);
         final orbitCounts = [2, 3, 4, 5, 5];
         await _completeTestStage(tester, orbitCounts[stageNumber - 1]);
+        await driver.flushAchievements();
         if (stageNumber < 5) {
           expect(find.text('STAGE COMPLETE'), findsOneWidget);
           expect(
             await StageProgressStore().loadUnlockedStage(),
             stageNumber + 1,
           );
+          if (stageNumber == 3) {
+            expect(
+              driver.achievementUnlocked(AchievementId.orbitExplorer),
+              isTrue,
+            );
+            expect(
+              driver.achievementUnlocked(AchievementId.orbitalMaster),
+              isFalse,
+            );
+          }
+          if (stageNumber == 4) {
+            expect(
+              driver.achievementUnlocked(AchievementId.orbitalMaster),
+              isFalse,
+            );
+          }
         } else {
           expect(find.text('GAME COMPLETE'), findsOneWidget);
           expect(await StageProgressStore().loadUnlockedStage(), 5);
+          expect(
+            driver.achievementUnlocked(AchievementId.orbitalMaster),
+            isTrue,
+          );
         }
       }
       expect(
@@ -888,6 +1152,7 @@ Future<OrbitGameTestDriver> _startShieldGame(WidgetTester tester) async {
   driver.moveGemAwayFromPlayer();
   await tester.pump(const Duration(milliseconds: 16));
   expect(driver.runState, RunState.playing);
+  await driver.flushAchievements();
   return driver;
 }
 
