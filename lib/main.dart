@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:orbit_dash/achievements.dart';
 import 'package:orbit_dash/audio/game_audio_manager.dart';
+import 'package:orbit_dash/daily_challenges.dart';
 import 'package:orbit_dash/player_statistics.dart';
 import 'package:orbit_dash/skins.dart';
 import 'package:flutter/material.dart';
@@ -39,6 +40,7 @@ enum RunState {
   achievements,
   skins,
   statistics,
+  dailyChallenges,
 }
 
 /// Deterministic controls and observations for game-cycle widget tests.
@@ -388,11 +390,13 @@ class OrbitGamePage extends StatefulWidget {
     this.audioController,
     this.stages = orbitStages,
     this.testDriver,
+    this.dailyChallengesNow,
   }) : assert(stages.length >= 1 && stages.length <= 5);
 
   final GameAudioController? audioController;
   final List<StageDefinition> stages;
   final OrbitGameTestDriver? testDriver;
+  final DateTime Function()? dailyChallengesNow;
 
   @override
   State<OrbitGamePage> createState() => _OrbitGamePageState();
@@ -413,6 +417,9 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   final StageProgressStore _stageProgressStore = StageProgressStore();
   final PlayerStatisticsStore _statisticsStore = PlayerStatisticsStore();
   final SkinStore _skinStore = SkinStore();
+  late final DailyChallengeStore _dailyChallengeStore;
+  bool _dailyChallengesLoaded = false;
+  bool _dailyChallengesLoadFailed = false;
   bool _featureStoresLoaded = false;
   bool _featureStoreLoadFailed = false;
   late Future<void> _featureStoresReady;
@@ -446,6 +453,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _audio = widget.audioController ?? GameAudioManager();
+    _dailyChallengeStore = DailyChallengeStore(now: widget.dailyChallengesNow);
     _audio.addListener(_audioSettingsChanged);
     unawaited(
       _audio.initialize().then((_) {
@@ -493,6 +501,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   }
 
   Future<void> _loadFeatureStores() async {
+    await _loadDailyChallenges();
     await _loadAchievements();
     await _loadStageProgress();
     try {
@@ -516,6 +525,18 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     }
   }
 
+  Future<void> _loadDailyChallenges() async {
+    try {
+      await _dailyChallengeStore.load();
+      _dailyChallengesLoaded = true;
+      _dailyChallengesLoadFailed = false;
+    } catch (error) {
+      debugPrint('Failed to load daily challenges: $error');
+      _dailyChallengesLoaded = false;
+      _dailyChallengesLoadFailed = true;
+    }
+  }
+
   void _retryFeatureStores() {
     _featureStoresReady = _loadFeatureStores();
     unawaited(_featureStoresReady);
@@ -527,6 +548,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     await _pendingFeatureWrites;
     await _statisticsStore.flush();
     await _skinStore.flush();
+    await _dailyChallengeStore.flush();
   }
 
   void _queueFeatureWrite(Future<void> Function() write) {
@@ -684,6 +706,11 @@ class _OrbitGamePageState extends State<OrbitGamePage>
           if (collisionResponse == ShieldCollisionResponse.absorbed) {
             absorbedHazards.add(hazard);
             _queueFeatureWrite(_recordShieldAbsorption);
+            _queueFeatureWrite(
+              () => _recordDailyChallengeEvent(
+                DailyChallengeEvent.shieldAbsorbed,
+              ),
+            );
             _queueAchievementUpdate(
               _achievementStore.unlock(AchievementId.savedByShield),
             );
@@ -710,6 +737,11 @@ class _OrbitGamePageState extends State<OrbitGamePage>
         _gemAngle = (_angle + 2.4 + (_score % 3) * 0.45) % (math.pi * 2);
         _gemLane = nextOrbitLane(_gemLane, _currentStage.orbitCount);
         _queueAchievementUpdate(_recordGemProgress());
+        _queueFeatureWrite(
+          () => _recordDailyChallengeEvent(
+            DailyChallengeEvent.gemCollected,
+          ),
+        );
         if (_completionGate.completeIfReached(_score, _currentStage)) {
           _completeStage();
           return;
@@ -764,6 +796,9 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     _audio.setGameState(AudioRunState.playing);
     _audio.playEffect(GameSoundEffect.start);
     _queueFeatureWrite(_recordRunStarted);
+    _queueFeatureWrite(
+      () => _recordDailyChallengeEvent(DailyChallengeEvent.runStarted),
+    );
   }
 
   void _finish() {
@@ -790,6 +825,9 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     _audio.setGameState(AudioRunState.over);
     _saveBestScore();
     _queueFeatureWrite(() => _recordStageCompletion(_currentStage.number));
+    _queueFeatureWrite(
+      () => _recordDailyChallengeEvent(DailyChallengeEvent.stageCompleted),
+    );
     final nextStage = _currentStageIndex + 1 < widget.stages.length
         ? widget.stages[_currentStageIndex + 1].number
         : null;
@@ -880,6 +918,15 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     }
   }
 
+  Future<void> _recordDailyChallengeEvent(DailyChallengeEvent event) async {
+    try {
+      await _dailyChallengeStore.recordEvent(event);
+      if (mounted) setState(() {});
+    } catch (error) {
+      debugPrint('Failed to save daily challenge progress: $error');
+    }
+  }
+
   Future<void> _continueToNextStage() async {
     if (_state != RunState.stageComplete ||
         _currentStageIndex >= widget.stages.length - 1) {
@@ -949,6 +996,30 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     _audio.setGameState(AudioRunState.menu);
   }
 
+  void _openDailyChallenges() {
+    setState(() {
+      _state = RunState.dailyChallenges;
+      _dailyChallengesLoaded = false;
+      _dailyChallengesLoadFailed = false;
+    });
+    _audio.setGameState(AudioRunState.menu);
+    unawaited(_refreshDailyChallenges());
+  }
+
+  Future<void> _refreshDailyChallenges() async {
+    await _loadDailyChallenges();
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _claimDailyChallengeReward(String id) async {
+    try {
+      await _dailyChallengeStore.claimReward(id);
+      if (mounted) setState(() {});
+    } catch (error) {
+      debugPrint('Failed to claim daily challenge reward: $error');
+    }
+  }
+
   Future<void> _selectSkin(ShipSkinId id) async {
     if (!_skinStore.isUnlocked(id)) return;
     try {
@@ -983,7 +1054,8 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     RunState.selectingStage ||
     RunState.achievements ||
     RunState.skins ||
-    RunState.statistics => AudioRunState.menu,
+    RunState.statistics ||
+    RunState.dailyChallenges => AudioRunState.menu,
     RunState.playing => AudioRunState.playing,
     RunState.paused => AudioRunState.paused,
     RunState.over ||
@@ -1053,6 +1125,16 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                         icon: const Icon(
                           Icons.emoji_events_rounded,
                           color: Color(0xffffd66e),
+                        ),
+                      ),
+                    if (_state == RunState.ready)
+                      IconButton(
+                        onPressed: _openDailyChallenges,
+                        tooltip: 'Daily challenges',
+                        visualDensity: VisualDensity.compact,
+                        icon: const Icon(
+                          Icons.calendar_today_rounded,
+                          color: Color(0xff65eaff),
                         ),
                       ),
                     if (_state == RunState.ready) ...[
@@ -1325,6 +1407,12 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     }
     if (_state == RunState.statistics) {
       return _statisticsContent(
+        compact: compact,
+        showAudioControls: showAudioControls,
+      );
+    }
+    if (_state == RunState.dailyChallenges) {
+      return _dailyChallengesContent(
         compact: compact,
         showAudioControls: showAudioControls,
       );
@@ -1854,6 +1942,165 @@ class _OrbitGamePageState extends State<OrbitGamePage>
       ),
     ],
   );
+
+  Widget _dailyChallengesContent({
+    required bool compact,
+    required bool showAudioControls,
+  }) => Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(Icons.calendar_today_rounded, color: const Color(0xff65eaff), size: 32),
+      SizedBox(height: compact ? 7 : 10),
+      Text(
+        'DAILY CHALLENGES',
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: compact ? 16 : 18,
+          letterSpacing: 2,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+      const SizedBox(height: 4),
+      Text(
+        _dailyChallengeStore.dateKey,
+        key: const ValueKey('daily-challenge-date'),
+        style: const TextStyle(color: Color(0xff8c9bb5), fontSize: 10),
+      ),
+      SizedBox(height: compact ? 8 : 11),
+      if (!_dailyChallengesLoaded)
+        Column(
+          children: [
+            Text(
+              _dailyChallengesLoadFailed
+                  ? 'Could not load daily challenges. Saved progress is unchanged.'
+                  : 'Loading daily challenges…',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: _dailyChallengesLoadFailed
+                    ? const Color(0xffffb4a9)
+                    : const Color(0xffaebbd2),
+                fontSize: 11,
+              ),
+            ),
+            if (_dailyChallengesLoadFailed)
+              _secondaryButton(
+                label: 'RETRY',
+                icon: Icons.refresh_rounded,
+                onPressed: () => unawaited(_refreshDailyChallenges()),
+              ),
+          ],
+        )
+      else ...[
+        for (final challenge in _dailyChallengeStore.challenges)
+          _dailyChallengeRow(challenge),
+        Text(
+          'Bonus gems granted: ${_dailyChallengeStore.bonusGemsGranted}',
+          key: const ValueKey('daily-bonus-gems'),
+          style: const TextStyle(color: Color(0xff8c9bb5), fontSize: 10),
+        ),
+      ],
+      if (showAudioControls) ...[
+        SizedBox(height: compact ? 5 : 8),
+        _audioSettingsRow(),
+      ],
+      SizedBox(height: compact ? 8 : 12),
+      _secondaryButton(
+        label: 'MAIN MENU',
+        icon: Icons.home_rounded,
+        onPressed: _returnToMenu,
+      ),
+    ],
+  );
+
+  Widget _dailyChallengeRow(DailyChallenge challenge) {
+    final definition = challenge.definition;
+    final progressRatio = definition.goal <= 0
+        ? 0.0
+        : (challenge.progress / definition.goal)
+              .clamp(0.0, 1.0)
+              .toDouble();
+    final displayedProgress = challenge.isComplete ? 1.0 : progressRatio;
+    final status = challenge.rewardClaimed
+        ? 'CLAIMED'
+        : challenge.isComplete
+        ? 'COMPLETE'
+        : 'IN PROGRESS';
+    return Container(
+      key: ValueKey('daily-challenge-${definition.id}'),
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 7),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xff151e33),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: challenge.isComplete
+              ? const Color(0x6670e9ff)
+              : const Color(0x337d8ba5),
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  definition.description,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  '${challenge.progress} / ${definition.goal}  ·  ${definition.gemReward} gems',
+                  key: ValueKey('daily-progress-${definition.id}'),
+                  style: const TextStyle(color: Color(0xffaebbd2), fontSize: 10),
+                ),
+                const SizedBox(height: 5),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(3),
+                  child: LinearProgressIndicator(
+                    key: ValueKey('daily-progress-bar-${definition.id}'),
+                    value: displayedProgress,
+                    minHeight: 4,
+                    backgroundColor: const Color(0xff28334a),
+                    color: const Color(0xff65eaff),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  status,
+                  key: ValueKey('daily-status-${definition.id}'),
+                  style: TextStyle(
+                    color: challenge.isComplete
+                        ? const Color(0xff65eaff)
+                        : Colors.white54,
+                    fontSize: 9,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            height: 36,
+            child: OutlinedButton(
+              key: ValueKey('daily-claim-${definition.id}'),
+              onPressed: challenge.isComplete && !challenge.rewardClaimed
+                  ? () => unawaited(_claimDailyChallengeReward(definition.id))
+                  : null,
+              child: Text(challenge.rewardClaimed ? 'CLAIMED' : 'CLAIM'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   IconData _skinIcon(ShipSkinId id) => switch (id) {
     ShipSkinId.defaultSkin => Icons.blur_circular_rounded,
