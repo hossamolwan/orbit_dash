@@ -9,6 +9,96 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
+  testWidgets('shop lists standard cosmetics before premium in every tab', (
+    tester,
+  ) async {
+    final driver = OrbitGameTestDriver();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: OrbitGamePage(audioController: _ShopAudio(), testDriver: driver),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await driver.flushProgress();
+    await tester.tap(find.byTooltip('Cosmetic shop'));
+    await tester.pumpAndSettle();
+
+    List<String> orderedOptionKeys<T>(
+      Iterable<T> skins,
+      String Function(T) id,
+      CosmeticRarity Function(T) rarity,
+      String prefix,
+    ) => [
+      ...skins
+          .where((skin) => rarity(skin) == CosmeticRarity.standard)
+          .map((skin) => '$prefix-option-${id(skin)}'),
+      ...skins
+          .where((skin) => rarity(skin) == CosmeticRarity.premium)
+          .map((skin) => '$prefix-option-${id(skin)}'),
+    ];
+
+    Future<void> expectCategoryOrder(
+      String category,
+      String prefix,
+      List<String> expected,
+    ) async {
+      final tab = find.byKey(ValueKey('cosmetic-tab-$category'));
+      await tester.ensureVisible(tab);
+      await tester.tap(tab);
+      await tester.pumpAndSettle();
+      final actual = tester
+          .widgetList<OutlinedButton>(find.byType(OutlinedButton))
+          .map((button) => button.key)
+          .whereType<ValueKey<String>>()
+          .map((key) => key.value)
+          .where((key) => key.startsWith('$prefix-option-'))
+          .toList();
+      expect(actual, expected, reason: '$category tab item order');
+    }
+
+    await expectCategoryOrder(
+      'ship',
+      'skin',
+      orderedOptionKeys(
+        shipSkins,
+        (skin) => skin.id.name,
+        (skin) => skin.rarity,
+        'skin',
+      ),
+    );
+    await expectCategoryOrder(
+      'orbit',
+      'orbit',
+      orderedOptionKeys(
+        orbitSkins,
+        (skin) => skin.id.name,
+        (skin) => skin.rarity,
+        'orbit',
+      ),
+    );
+    await expectCategoryOrder(
+      'core',
+      'core',
+      orderedOptionKeys(
+        coreSkins,
+        (skin) => skin.id.name,
+        (skin) => skin.rarity,
+        'core',
+      ),
+    );
+    await expectCategoryOrder(
+      'trail',
+      'trail',
+      orderedOptionKeys(
+        trailSkins,
+        (skin) => skin.id.name,
+        (skin) => skin.rarity,
+        'trail',
+      ),
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('shop buys and equips orbit and core cosmetics', (tester) async {
     SharedPreferences.setMockInitialValues({
       GemWallet.stateKey: '{"version":2,"balance":300,"dailyRewardDate":null,"dailyRewardIds":[],"purchases":{}}',
@@ -39,7 +129,9 @@ void main() {
     );
     expect(find.byKey(const ValueKey('core-option-defaultCore')), findsNothing);
 
-    await tester.tap(find.byKey(const ValueKey('cosmetic-tab-orbit')));
+    final orbitTab = find.byKey(const ValueKey('cosmetic-tab-orbit'));
+    await tester.ensureVisible(orbitTab);
+    await tester.tap(orbitTab);
     await tester.pumpAndSettle();
     expect(find.text('ORBIT SKINS'), findsOneWidget);
     expect(
@@ -60,7 +152,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(driver.selectedOrbit, OrbitSkinId.aurora);
 
-    await tester.tap(find.byKey(const ValueKey('cosmetic-tab-ship')));
+    final shipTab = find.byKey(const ValueKey('cosmetic-tab-ship'));
+    await tester.ensureVisible(shipTab);
+    await tester.tap(shipTab);
     await tester.pumpAndSettle();
     expect(driver.selectedSkin, ShipSkinId.defaultSkin);
     expect(driver.selectedOrbit, OrbitSkinId.aurora);
@@ -71,7 +165,9 @@ void main() {
     );
     expect(find.byKey(const ValueKey('orbit-option-aurora')), findsNothing);
 
-    await tester.tap(find.byKey(const ValueKey('cosmetic-tab-core')));
+    final coreTab = find.byKey(const ValueKey('cosmetic-tab-core'));
+    await tester.ensureVisible(coreTab);
+    await tester.tap(coreTab);
     await tester.pumpAndSettle();
     expect(find.text('CORE SKINS'), findsOneWidget);
     expect(
@@ -111,8 +207,7 @@ void main() {
     tester,
   ) async {
     SharedPreferences.setMockInitialValues({
-      GemWallet.stateKey:
-          '{"version":2,"balance":450,"dailyRewardDate":null,"dailyRewardIds":[],"purchases":{"ship.emerald":40,"orbit.aurora":60,"core.crimson":75}}',
+      GemWallet.stateKey: '{"version":2,"balance":450,"dailyRewardDate":null,"dailyRewardIds":[],"purchases":{"ship.emerald":40,"orbit.aurora":60,"core.crimson":75}}',
       SkinStore.selectedSkinKey: 'emerald',
       AppearanceStore.selectedOrbitKey: 'aurora',
       AppearanceStore.selectedCoreKey: 'crimson',
@@ -189,8 +284,7 @@ void main() {
     tester,
   ) async {
     SharedPreferences.setMockInitialValues({
-      GemWallet.stateKey:
-          '{"version":2,"balance":0,"dailyRewardDate":null,"dailyRewardIds":[],"purchases":{"ship.emerald":25,"orbit.aurora":40,"core.crimson":50}}',
+      GemWallet.stateKey: '{"version":2,"balance":0,"dailyRewardDate":null,"dailyRewardIds":[],"purchases":{"ship.emerald":25,"orbit.aurora":40,"core.crimson":50}}',
       SkinStore.selectedSkinKey: 'emerald',
       AppearanceStore.selectedOrbitKey: 'aurora',
       AppearanceStore.selectedCoreKey: 'crimson',
@@ -208,14 +302,22 @@ void main() {
 
     final preferences = await SharedPreferences.getInstance();
     final walletStateBefore = preferences.getString(GemWallet.stateKey);
-    final shipSelectionBefore = preferences.getString(SkinStore.selectedSkinKey);
-    final orbitSelectionBefore = preferences.getString(AppearanceStore.selectedOrbitKey);
-    final coreSelectionBefore = preferences.getString(AppearanceStore.selectedCoreKey);
+    final shipSelectionBefore = preferences.getString(
+      SkinStore.selectedSkinKey,
+    );
+    final orbitSelectionBefore = preferences.getString(
+      AppearanceStore.selectedOrbitKey,
+    );
+    final coreSelectionBefore = preferences.getString(
+      AppearanceStore.selectedCoreKey,
+    );
     final originalWallet = GemWallet();
     await originalWallet.load();
     final ownedBefore = originalWallet.purchasedItemIds;
 
-    await tester.ensureVisible(find.byKey(const ValueKey('preview-ship-supernova')));
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('preview-ship-supernova')),
+    );
     await tester.tap(find.byKey(const ValueKey('preview-ship-supernova')));
     await tester.pumpAndSettle();
     _expectPreviewScene(
@@ -234,17 +336,30 @@ void main() {
     expect(driver.selectedSkin, ShipSkinId.emerald);
     await _expectWalletOwnership(ownedBefore);
     expect(preferences.getString(GemWallet.stateKey), walletStateBefore);
-    expect(preferences.getString(SkinStore.selectedSkinKey), shipSelectionBefore);
-    expect(preferences.getString(AppearanceStore.selectedOrbitKey), orbitSelectionBefore);
-    expect(preferences.getString(AppearanceStore.selectedCoreKey), coreSelectionBefore);
+    expect(
+      preferences.getString(SkinStore.selectedSkinKey),
+      shipSelectionBefore,
+    );
+    expect(
+      preferences.getString(AppearanceStore.selectedOrbitKey),
+      orbitSelectionBefore,
+    );
+    expect(
+      preferences.getString(AppearanceStore.selectedCoreKey),
+      coreSelectionBefore,
+    );
     await tester.tap(find.byKey(const ValueKey('cosmetic-preview-close')));
     await tester.pumpAndSettle();
     expect(find.text('SHIP SKINS'), findsOneWidget);
     expect(find.byKey(const ValueKey('skin-option-supernova')), findsOneWidget);
 
-    await tester.tap(find.byKey(const ValueKey('cosmetic-tab-orbit')));
+    final orbitTab = find.byKey(const ValueKey('cosmetic-tab-orbit'));
+    await tester.ensureVisible(orbitTab);
+    await tester.tap(orbitTab);
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byKey(const ValueKey('preview-orbit-solar')));
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('preview-orbit-solar')),
+    );
     await tester.tap(find.byKey(const ValueKey('preview-orbit-solar')));
     await tester.pumpAndSettle();
     _expectPreviewScene(
@@ -259,9 +374,13 @@ void main() {
     expect(find.text('ORBIT SKINS'), findsOneWidget);
     expect(find.byKey(const ValueKey('orbit-option-solar')), findsOneWidget);
 
-    await tester.tap(find.byKey(const ValueKey('cosmetic-tab-core')));
+    final coreTab = find.byKey(const ValueKey('cosmetic-tab-core'));
+    await tester.ensureVisible(coreTab);
+    await tester.tap(coreTab);
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byKey(const ValueKey('preview-core-glacier')));
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('preview-core-glacier')),
+    );
     await tester.tap(find.byKey(const ValueKey('preview-core-glacier')));
     await tester.pumpAndSettle();
     _expectPreviewScene(
@@ -275,10 +394,14 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('CORE SKINS'), findsOneWidget);
     expect(find.byKey(const ValueKey('core-option-glacier')), findsOneWidget);
-    await tester.ensureVisible(find.byKey(const ValueKey('cosmetic-tab-trail')));
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('cosmetic-tab-trail')),
+    );
     await tester.tap(find.byKey(const ValueKey('cosmetic-tab-trail')));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byKey(const ValueKey('preview-trail-solar')));
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('preview-trail-solar')),
+    );
     await tester.tap(find.byKey(const ValueKey('preview-trail-solar')));
     await tester.pumpAndSettle();
     _expectPreviewScene(
@@ -294,13 +417,105 @@ void main() {
     expect(find.byKey(const ValueKey('trail-option-solar')), findsOneWidget);
     await driver.flushProgress();
     expect(preferences.getString(GemWallet.stateKey), walletStateBefore);
-    expect(preferences.getString(SkinStore.selectedSkinKey), shipSelectionBefore);
-    expect(preferences.getString(AppearanceStore.selectedOrbitKey), orbitSelectionBefore);
-    expect(preferences.getString(AppearanceStore.selectedCoreKey), coreSelectionBefore);
+    expect(
+      preferences.getString(SkinStore.selectedSkinKey),
+      shipSelectionBefore,
+    );
+    expect(
+      preferences.getString(AppearanceStore.selectedOrbitKey),
+      orbitSelectionBefore,
+    );
+    expect(
+      preferences.getString(AppearanceStore.selectedCoreKey),
+      coreSelectionBefore,
+    );
     expect(
       preferences.getString(AppearanceStore.selectedTrailKey),
       TrailSkinId.classic.name,
     );
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('all catalog skins are discoverable and previewable', (
+    tester,
+  ) async {
+    final driver = OrbitGameTestDriver();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: OrbitGamePage(audioController: _ShopAudio(), testDriver: driver),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await driver.flushProgress();
+    await tester.tap(find.byTooltip('Cosmetic shop'));
+    await tester.pumpAndSettle();
+    final preferences = await SharedPreferences.getInstance();
+    final walletBefore = preferences.getString(GemWallet.stateKey);
+    final wallet = GemWallet();
+    await wallet.load();
+    final ownershipBefore = wallet.purchasedItemIds;
+
+    Future<void> previewCategory(
+      String category,
+      String candidateField,
+      Iterable<String> ids,
+    ) async {
+      final tab = find.byKey(ValueKey('cosmetic-tab-$category'));
+      await tester.ensureVisible(tab);
+      await tester.tap(tab);
+      await tester.pumpAndSettle();
+      expect(find.text('${category.toUpperCase()} SKINS'), findsOneWidget);
+      for (final id in ids) {
+        final preview = find.byKey(ValueKey('preview-$category-$id'));
+        await tester.ensureVisible(preview);
+        await tester.tap(preview);
+        await tester.pumpAndSettle();
+        final scene = tester.widget<Semantics>(
+          find
+              .ancestor(
+                of: find.byKey(const ValueKey('cosmetic-preview-scene')),
+                matching: find.byType(Semantics),
+              )
+              .first,
+        );
+        expect(scene.properties.label, contains('$candidateField=$id'));
+        expect(find.byType(CustomPaint), findsWidgets);
+        expect(tester.takeException(), isNull);
+        await tester.tap(find.byKey(const ValueKey('cosmetic-preview-close')));
+        await tester.pumpAndSettle();
+        expect(find.text('${category.toUpperCase()} SKINS'), findsOneWidget);
+      }
+    }
+
+    await previewCategory(
+      'ship',
+      'ship',
+      shipSkins.map((skin) => skin.id.name),
+    );
+    await previewCategory(
+      'orbit',
+      'orbit',
+      orbitSkins.map((skin) => skin.id.name),
+    );
+    await previewCategory(
+      'core',
+      'core',
+      coreSkins.map((skin) => skin.id.name),
+    );
+    await previewCategory(
+      'trail',
+      'trail',
+      trailSkins.map((skin) => skin.id.name),
+    );
+    await driver.flushProgress();
+    expect(preferences.getString(GemWallet.stateKey), walletBefore);
+    final restored = GemWallet();
+    await restored.load();
+    expect(restored.purchasedItemIds, ownershipBefore);
+    expect(driver.selectedSkin, ShipSkinId.defaultSkin);
+    expect(driver.selectedOrbit, OrbitSkinId.defaultOrbit);
+    expect(driver.selectedCore, CoreSkinId.defaultCore);
+    expect(driver.selectedTrail, TrailSkinId.classic);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
@@ -328,30 +543,36 @@ void main() {
     );
     expect(find.byKey(const ValueKey('core-option-defaultCore')), findsNothing);
     expect(tester.takeException(), isNull);
-    await tester.tap(find.byKey(const ValueKey('cosmetic-tab-orbit')));
+    final tabs = find.byKey(const ValueKey('cosmetic-category-tabs-scroll'));
+    final trailTab = find.byKey(const ValueKey('cosmetic-tab-trail'));
+    expect(
+      tester.getRect(trailTab).right,
+      greaterThan(tester.getRect(tabs).right),
+    );
+    await tester.ensureVisible(trailTab);
+    await tester.tap(trailTab);
+    await tester.pumpAndSettle();
+    expect(find.text('TRAIL SKINS'), findsOneWidget);
+    final orbitTab = find.byKey(const ValueKey('cosmetic-tab-orbit'));
+    await tester.ensureVisible(orbitTab);
+    await tester.tap(orbitTab);
     await tester.pumpAndSettle();
     expect(find.text('ORBIT SKINS'), findsOneWidget);
     expect(find.byKey(const ValueKey('orbit-option-aurora')), findsOneWidget);
     expect(find.byKey(const ValueKey('skin-option-defaultSkin')), findsNothing);
-    final tabs = find.byKey(const ValueKey('cosmetic-category-tabs-scroll'));
     final coreTab = find.byKey(const ValueKey('cosmetic-tab-core'));
-    expect(
-      tester.getRect(coreTab).right,
-      greaterThan(tester.getRect(tabs).right),
-    );
     await tester.ensureVisible(coreTab);
-    expect(
-      tester.getRect(coreTab).right,
-      lessThanOrEqualTo(tester.getRect(tabs).right),
-    );
     await tester.tap(coreTab);
     await tester.pumpAndSettle();
     expect(find.text('CORE SKINS'), findsOneWidget);
     expect(find.byKey(const ValueKey('core-option-glacier')), findsOneWidget);
     expect(find.byKey(const ValueKey('orbit-option-aurora')), findsNothing);
     expect(tester.takeException(), isNull);
-    final trailTab = find.byKey(const ValueKey('cosmetic-tab-trail'));
     await tester.ensureVisible(trailTab);
+    expect(
+      tester.getRect(trailTab).right,
+      lessThanOrEqualTo(tester.getRect(tabs).right),
+    );
     await tester.tap(trailTab);
     await tester.pumpAndSettle();
     expect(find.text('TRAIL SKINS'), findsOneWidget);
@@ -359,7 +580,10 @@ void main() {
     await tester.ensureVisible(solarPreview);
     await tester.tap(solarPreview);
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('cosmetic-preview-scene')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('cosmetic-preview-scene')),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
     await tester.tap(find.byKey(const ValueKey('cosmetic-preview-close')));
     await tester.pumpAndSettle();

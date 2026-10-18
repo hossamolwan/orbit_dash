@@ -110,7 +110,31 @@ void main() {
     test(
       'purchase ledger supports standard and premium catalog entries',
       () async {
-        expect(shipSkins.map((skin) => skin.price), [0, 40, 100, 250, 500]);
+        expect(shipSkins.length, 10);
+        expect(shipSkins.map((skin) => skin.itemId), [
+          'ship.defaultSkin',
+          'ship.emerald',
+          'ship.nebula',
+          'ship.solar',
+          'ship.supernova',
+          'ship.obsidian',
+          'ship.prism',
+          'ship.inferno',
+          'ship.frostbite',
+          'ship.phantom',
+        ]);
+        expect(shipSkins.map((skin) => skin.price), [
+          0,
+          40,
+          100,
+          250,
+          500,
+          650,
+          800,
+          950,
+          1100,
+          1250,
+        ]);
         expect(
           shipSkins
               .map((skin) => skin.price)
@@ -118,7 +142,7 @@ void main() {
               .followedBy(coreSkins.map((skin) => skin.price))
               .where((price) => price > 0)
               .fold<int>(0, (total, price) => total + price),
-          1600,
+          17275,
         );
         expect(shipSkins[1].rarity, CosmeticRarity.standard);
         expect(shipSkins[3].rarity, CosmeticRarity.premium);
@@ -146,30 +170,68 @@ void main() {
     test(
       'orbit and core catalogs have stable IDs, prices, rarity and defaults',
       () {
+        expect(orbitSkins.length, 10);
         expect(orbitSkins.map((skin) => skin.itemId), [
           'orbit.defaultOrbit',
           'orbit.aurora',
           'orbit.solar',
+          'orbit.eclipse',
+          'orbit.plasma',
+          'orbit.ion',
+          'orbit.pulsar',
+          'orbit.void',
+          'orbit.prism',
+          'orbit.radiant',
         ]);
-        expect(orbitSkins.map((skin) => skin.price), [0, 60, 275]);
+        expect(orbitSkins.map((skin) => skin.price), [
+          0,
+          60,
+          200,
+          500,
+          600,
+          750,
+          900,
+          300,
+          1200,
+          400,
+        ]);
         expect(
           orbitSkins.every((skin) => skin.category == CosmeticCategory.orbit),
           isTrue,
         );
         expect(orbitSkins[1].rarity, CosmeticRarity.standard);
-        expect(orbitSkins[2].rarity, CosmeticRarity.premium);
+        expect(orbitSkins[2].rarity, CosmeticRarity.standard);
+        expect(coreSkins.length, 10);
         expect(coreSkins.map((skin) => skin.itemId), [
           'core.defaultCore',
           'core.crimson',
           'core.glacier',
+          'core.toxic',
+          'core.void',
+          'core.magma',
+          'core.ocean',
+          'core.rose',
+          'core.stellar',
+          'core.quantum',
         ]);
-        expect(coreSkins.map((skin) => skin.price), [0, 75, 300]);
+        expect(coreSkins.map((skin) => skin.price), [
+          0,
+          75,
+          300,
+          450,
+          600,
+          750,
+          900,
+          1050,
+          1200,
+          1400,
+        ]);
         expect(
           coreSkins.every((skin) => skin.category == CosmeticCategory.core),
           isTrue,
         );
         expect(coreSkins[1].rarity, CosmeticRarity.standard);
-        expect(coreSkins[2].rarity, CosmeticRarity.premium);
+        expect(coreSkins[2].rarity, CosmeticRarity.standard);
         expect(
           CosmeticCategory.values,
           containsAll([
@@ -181,15 +243,156 @@ void main() {
       },
     );
 
+    test('all 40 cosmetic definitions have unique IDs and visual styles', () {
+      final ids = <String>{
+        ...shipSkins.map((skin) => skin.itemId),
+        ...orbitSkins.map((skin) => skin.itemId),
+        ...coreSkins.map((skin) => skin.itemId),
+        ...trailSkins.map((skin) => skin.itemId),
+      };
+      final descriptions = [
+        ...shipSkins.map(
+          (skin) => '${skin.name}|${skin.description}|${skin.price}',
+        ),
+        ...orbitSkins.map(
+          (skin) => '${skin.name}|${skin.description}|${skin.price}',
+        ),
+        ...coreSkins.map(
+          (skin) => '${skin.name}|${skin.description}|${skin.price}',
+        ),
+        ...trailSkins.map(
+          (skin) => '${skin.name}|${skin.description}|${skin.price}',
+        ),
+      ];
+      expect(shipSkins.length, 10);
+      expect(orbitSkins.length, 10);
+      expect(coreSkins.length, 10);
+      expect(trailSkins.length, 10);
+      expect(ids.length, 40);
+      expect(descriptions.length, 40);
+      expect(descriptions.every((entry) => !entry.startsWith('|')), isTrue);
+      expect(descriptions.every((entry) => !entry.contains('||')), isTrue);
+      expect(shipVisualStyles.keys.toSet(), ShipSkinId.values.toSet());
+      expect(orbitVisualStyles.keys.toSet(), OrbitSkinId.values.toSet());
+      expect(coreVisualStyles.keys.toSet(), CoreSkinId.values.toSet());
+      expect(trailVisualStyles.keys.toSet(), TrailSkinId.values.toSet());
+    });
+
+    test('all 40 cosmetics have the approved rarity by stable item ID', () {
+      const standard = CosmeticRarity.standard;
+      const premium = CosmeticRarity.premium;
+      const expected = <String, CosmeticRarity>{
+        'ship.defaultSkin': standard,
+        'ship.emerald': standard,
+        'ship.nebula': standard,
+        'ship.solar': premium,
+        'ship.supernova': premium,
+        'ship.obsidian': premium,
+        'ship.prism': premium,
+        'ship.inferno': premium,
+        'ship.frostbite': premium,
+        'ship.phantom': premium,
+        'orbit.defaultOrbit': standard,
+        'orbit.aurora': standard,
+        'orbit.solar': standard,
+        'orbit.eclipse': premium,
+        'orbit.plasma': premium,
+        'orbit.ion': premium,
+        'orbit.pulsar': premium,
+        'orbit.void': standard,
+        'orbit.prism': premium,
+        'orbit.radiant': standard,
+        'core.defaultCore': standard,
+        'core.crimson': standard,
+        'core.glacier': standard,
+        'core.toxic': premium,
+        'core.void': premium,
+        'core.magma': premium,
+        'core.ocean': premium,
+        'core.rose': premium,
+        'core.stellar': premium,
+        'core.quantum': premium,
+        'trail.classic': standard,
+        'trail.aurora': standard,
+        'trail.solar': standard,
+        'trail.frost': standard,
+        'trail.phantom': standard,
+        'trail.electric': standard,
+        'trail.ember': premium,
+        'trail.stardust': premium,
+        'trail.toxic': premium,
+        'trail.spectrum': premium,
+      };
+      final actual = <String, CosmeticRarity>{
+        for (final skin in shipSkins) skin.itemId: skin.rarity,
+        for (final skin in orbitSkins) skin.itemId: skin.rarity,
+        for (final skin in coreSkins) skin.itemId: skin.rarity,
+        for (final skin in trailSkins) skin.itemId: skin.rarity,
+      };
+
+      expect(expected.length, 40);
+      expect(actual, expected);
+      expect(orbitSkins.where((skin) => skin.rarity == standard).length, 5);
+      expect(orbitSkins.where((skin) => skin.rarity == premium).length, 5);
+    });
+
+    test('eclipse and plasma have dedicated orbit rendering styles', () {
+      expect(
+        orbitVisualStyles[OrbitSkinId.eclipse]!.pattern,
+        OrbitPattern.eclipse,
+      );
+      expect(
+        orbitVisualStyles[OrbitSkinId.plasma]!.pattern,
+        OrbitPattern.plasma,
+      );
+      expect(
+        orbitSkins
+            .singleWhere((skin) => skin.id == OrbitSkinId.eclipse)
+            .description,
+        'A shadowed violet orbit edged by a luminous crescent.',
+      );
+      expect(
+        orbitSkins
+            .singleWhere((skin) => skin.id == OrbitSkinId.plasma)
+            .description,
+        'Jagged magenta energy arcs crackle along the orbit.',
+      );
+      expect(
+        orbitSkins
+            .singleWhere((skin) => skin.id == OrbitSkinId.voidOrbit)
+            .description,
+        'A deep-space ring with pale violet markers.',
+      );
+    });
+
     test(
       'trail catalog has stable IDs, pricing, rarity and a free default',
       () {
+        expect(trailSkins.length, 10);
         expect(trailSkins.map((skin) => skin.itemId), [
           'trail.classic',
           'trail.aurora',
           'trail.solar',
+          'trail.frost',
+          'trail.phantom',
+          'trail.electric',
+          'trail.ember',
+          'trail.stardust',
+          'trail.toxic',
+          'trail.spectrum',
         ]);
-        expect(trailSkins.map((skin) => skin.price), [0, 100, 350]);
+        expect(trailSkins.map((skin) => skin.price), [
+          0,
+          100,
+          350,
+          450,
+          550,
+          700,
+          850,
+          1000,
+          1150,
+          1350,
+        ]);
         expect(
           trailSkins.every((skin) => skin.category == CosmeticCategory.trail),
           isTrue,
@@ -197,7 +400,8 @@ void main() {
         expect(trailSkins[0].rarity, CosmeticRarity.standard);
         expect(trailSkins[0].price, 0);
         expect(trailSkins[1].rarity, CosmeticRarity.standard);
-        expect(trailSkins[2].rarity, CosmeticRarity.premium);
+        expect(trailSkins[2].rarity, CosmeticRarity.standard);
+        expect(trailSkins.skip(3).every((skin) => skin.price > 0), isTrue);
         expect(CosmeticCategory.values, contains(CosmeticCategory.trail));
       },
     );
@@ -254,7 +458,12 @@ void main() {
       () async {
         final wallet = GemWallet();
         await wallet.load();
-        await wallet.creditPickupOnce('gift', 810);
+        final allCatalogPrice = [
+          ...orbitSkins.skip(1).map((skin) => skin.price),
+          ...coreSkins.skip(1).map((skin) => skin.price),
+          100,
+        ].fold<int>(0, (total, price) => total + price);
+        await wallet.creditPickupOnce('gift', allCatalogPrice);
         for (final skin in orbitSkins.skip(1)) {
           expect(
             await wallet.purchase(itemId: skin.itemId, price: skin.price),

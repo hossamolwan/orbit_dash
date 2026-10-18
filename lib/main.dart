@@ -2002,7 +2002,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
         _cosmeticCategoryTabs(),
         _cosmeticSectionTitle(_selectedShopCategory.sectionTitle),
         if (_selectedShopCategory == CosmeticShopCategory.ship)
-          for (final skin in shipSkins)
+          for (final skin in _skinsByRarity(shipSkins, (skin) => skin.rarity))
             _cosmeticItemWithPreview(
               key: 'ship-${skin.id.name}',
               name: skin.name,
@@ -2018,7 +2018,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
               ),
             )
         else if (_selectedShopCategory == CosmeticShopCategory.orbit)
-          for (final skin in orbitSkins)
+          for (final skin in _skinsByRarity(orbitSkins, (skin) => skin.rarity))
             _cosmeticItemWithPreview(
               key: 'orbit-${skin.id.name}',
               name: skin.name,
@@ -2046,7 +2046,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
               ),
             )
         else if (_selectedShopCategory == CosmeticShopCategory.core)
-          for (final skin in coreSkins)
+          for (final skin in _skinsByRarity(coreSkins, (skin) => skin.rarity))
             _cosmeticItemWithPreview(
               key: 'core-${skin.id.name}',
               name: skin.name,
@@ -2074,7 +2074,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
               ),
             )
         else if (_selectedShopCategory == CosmeticShopCategory.trail)
-          for (final skin in trailSkins)
+          for (final skin in _skinsByRarity(trailSkins, (skin) => skin.rarity))
             _cosmeticItemWithPreview(
               key: 'trail-${skin.id.name}',
               name: skin.name,
@@ -2119,24 +2119,23 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     required String name,
     required Widget option,
     required VoidCallback onPreview,
-  }) =>
-      Row(
-        children: [
-          Expanded(child: option),
-          IconButton(
-            key: ValueKey('preview-$key'),
-            tooltip: 'Preview $name',
-            visualDensity: VisualDensity.compact,
-            constraints: const BoxConstraints.tightFor(width: 36, height: 48),
-            onPressed: onPreview,
-            icon: const Icon(
-              Icons.visibility_rounded,
-              color: Color(0xff65eaff),
-              size: 19,
-            ),
-          ),
-        ],
-      );
+  }) => Row(
+    children: [
+      Expanded(child: option),
+      IconButton(
+        key: ValueKey('preview-$key'),
+        tooltip: 'Preview $name',
+        visualDensity: VisualDensity.compact,
+        constraints: const BoxConstraints.tightFor(width: 36, height: 48),
+        onPressed: onPreview,
+        icon: const Icon(
+          Icons.visibility_rounded,
+          color: Color(0xff65eaff),
+          size: 19,
+        ),
+      ),
+    ],
+  );
 
   void _showCosmeticPreview({
     required String name,
@@ -2160,6 +2159,14 @@ class _OrbitGamePageState extends State<OrbitGamePage>
       ),
     );
   }
+
+  List<T> _skinsByRarity<T>(
+    List<T> skins,
+    CosmeticRarity Function(T) rarityOf,
+  ) => [
+    ...skins.where((skin) => rarityOf(skin) == CosmeticRarity.standard),
+    ...skins.where((skin) => rarityOf(skin) == CosmeticRarity.premium),
+  ];
 
   Widget _cosmeticCategoryTabs() => SingleChildScrollView(
     key: const ValueKey('cosmetic-category-tabs-scroll'),
@@ -2253,7 +2260,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
           onPressed: owned || canAfford ? () => unawaited(onSelect()) : null,
           style: OutlinedButton.styleFrom(
             alignment: Alignment.centerLeft,
-            padding: const EdgeInsets.symmetric(horizontal: 11),
+            padding: const EdgeInsets.symmetric(horizontal: 8),
             foregroundColor: Colors.white,
             disabledForegroundColor: Colors.white38,
             side: BorderSide(
@@ -2347,7 +2354,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
               : null,
           style: OutlinedButton.styleFrom(
             alignment: Alignment.centerLeft,
-            padding: const EdgeInsets.symmetric(horizontal: 11),
+            padding: const EdgeInsets.symmetric(horizontal: 8),
             foregroundColor: Colors.white,
             disabledForegroundColor: Colors.white38,
             side: BorderSide(
@@ -2656,6 +2663,11 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     ShipSkinId.nebula => Icons.auto_awesome_rounded,
     ShipSkinId.solar => Icons.wb_sunny_rounded,
     ShipSkinId.supernova => Icons.flare_rounded,
+    ShipSkinId.obsidian => Icons.hexagon_rounded,
+    ShipSkinId.prism => Icons.diamond_outlined,
+    ShipSkinId.inferno => Icons.local_fire_department_rounded,
+    ShipSkinId.frostbite => Icons.ac_unit_rounded,
+    ShipSkinId.phantom => Icons.nights_stay_rounded,
   };
 
   Widget _progressStoreMessage() => Column(
@@ -2946,25 +2958,39 @@ class _Star {
 }
 
 class _OrbitPainter extends CustomPainter {
+  static const _spectrumColors = [
+    Color(0xffff68d2),
+    Color(0xff51eaff),
+    Color(0xffffd45c),
+  ];
   static final Map<TrailSkinId, List<Paint>> _trailParticlePaints = {
     for (final entry in trailVisualStyles.entries)
-      entry.key: List<Paint>.generate(
-        3,
-        (index) => Paint()
-          ..color = Color(entry.value.color).withValues(
+      entry.key: List<Paint>.generate(3, (index) {
+        final color = entry.value.pattern == TrailPattern.spectrum
+            ? _spectrumColors[index]
+            : Color(entry.value.color);
+        return Paint()
+          ..color = color.withValues(
             alpha: entry.value.particleAlpha + .06 * index,
-          ),
-      ),
+          );
+      }),
   };
   static final Map<TrailSkinId, List<Paint>> _trailGlowPaints = {
     for (final entry in trailVisualStyles.entries)
-      entry.key: List<Paint>.generate(
-        3,
-        (index) => Paint()
-          ..color = Color(entry.value.color).withValues(
+      entry.key: List<Paint>.generate(3, (index) {
+        final color = entry.value.pattern == TrailPattern.spectrum
+            ? _spectrumColors[index]
+            : Color(entry.value.color);
+        return Paint()
+          ..color = color.withValues(
             alpha: entry.value.glowAlpha * (index + 1) / 3,
-          ),
-      ),
+          );
+      }),
+  };
+  static final Map<TrailSkinId, Paint> _trailAccentPaints = {
+    for (final entry in trailVisualStyles.entries)
+      entry.key: Paint()
+        ..color = Color(entry.value.accentColor).withValues(alpha: .86),
   };
   static final List<_Star> _stars = List<_Star>.generate(70, (i) {
     final x = (math.sin(i * 127.1) * 43758.5).abs() % 1;
@@ -3021,6 +3047,7 @@ class _OrbitPainter extends CustomPainter {
         stops: const [0, 1],
       ).createShader(Rect.fromCircle(center: center, radius: radius * 1.7));
     canvas.drawCircle(center, radius * 1.7, bg);
+    final orbitColors = _orbitPalette(orbitSkin);
     for (final star in _stars) {
       canvas.drawCircle(
         Offset(star.x * size.width, star.y * size.height),
@@ -3029,7 +3056,6 @@ class _OrbitPainter extends CustomPainter {
       );
     }
     for (final r in geometry.radii) {
-      final orbitColors = _orbitPalette(orbitSkin);
       canvas.drawCircle(
         center,
         r,
@@ -3050,10 +3076,36 @@ class _OrbitPainter extends CustomPainter {
         center,
         r,
         Paint()
-          ..color = Colors.white.withValues(alpha: .12)
+          ..color = orbitColors.highlight.withValues(alpha: .12)
           ..style = PaintingStyle.stroke
           ..strokeWidth = .55,
       );
+      if (orbitColors.pattern == OrbitPattern.prism) {
+        const prismColors = [
+          Color(0xffff6fcf),
+          Color(0xffffc857),
+          Color(0xffa5ff79),
+          Color(0xff50e6ff),
+          Color(0xff7284ff),
+          Color(0xffc678ff),
+        ];
+        for (var i = 0; i < prismColors.length; i++) {
+          canvas.drawArc(
+            Rect.fromCircle(center: center, radius: r),
+            i * _fullTurn / prismColors.length,
+            _fullTurn / prismColors.length * .72,
+            false,
+            Paint()
+              ..color = prismColors[i].withValues(alpha: .85)
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 1.7,
+          );
+        }
+      } else if (orbitColors.pattern == OrbitPattern.eclipse) {
+        _drawEclipseOrbit(canvas, center, r, orbitColors);
+      } else if (orbitColors.pattern == OrbitPattern.plasma) {
+        _drawPlasmaOrbit(canvas, center, r, orbitColors);
+      }
     }
     _orbitMarkers(canvas, center, geometry.radii);
     _planet(canvas, center, radius * (orbitCount == 2 ? .40 : .10));
@@ -3103,6 +3155,86 @@ class _OrbitPainter extends CustomPainter {
     );
   }
 
+  void _drawEclipseOrbit(
+    Canvas canvas,
+    Offset center,
+    double radius,
+    _OrbitColors colors,
+  ) {
+    final bounds = Rect.fromCircle(center: center, radius: radius);
+    canvas.drawArc(
+      bounds,
+      -math.pi * .82,
+      math.pi * .72,
+      false,
+      Paint()
+        ..color = colors.glow.withValues(alpha: .78)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.2,
+    );
+    canvas.drawArc(
+      bounds,
+      math.pi * .18,
+      math.pi * .52,
+      false,
+      Paint()
+        ..color = colors.highlight.withValues(alpha: .9)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.1,
+    );
+    canvas.drawArc(
+      bounds,
+      math.pi * .36,
+      math.pi * .2,
+      false,
+      Paint()
+        ..color = colors.stroke.withValues(alpha: .95)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3.2,
+    );
+  }
+
+  void _drawPlasmaOrbit(
+    Canvas canvas,
+    Offset center,
+    double radius,
+    _OrbitColors colors,
+  ) {
+    Offset point(double angle, double radialOffset) =>
+        center +
+        Offset(
+          math.cos(angle) * (radius + radialOffset),
+          math.sin(angle) * (radius + radialOffset),
+        );
+
+    final arcPaint = Paint()
+      ..color = colors.highlight.withValues(alpha: .92)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.35
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    final sparkPaint = Paint()..color = colors.marker.withValues(alpha: .9);
+    for (var i = 0; i < 8; i++) {
+      final start = i * _fullTurn / 8;
+      final step = _fullTurn / 32;
+      final path = Path()
+        ..moveTo(point(start, -1.5).dx, point(start, -1.5).dy)
+        ..lineTo(point(start + step, 1.7).dx, point(start + step, 1.7).dy)
+        ..lineTo(
+          point(start + step * 2, -.8).dx,
+          point(start + step * 2, -.8).dy,
+        )
+        ..lineTo(
+          point(start + step * 3, 1.4).dx,
+          point(start + step * 3, 1.4).dy,
+        )
+        ..lineTo(point(start + step * 4, 0).dx, point(start + step * 4, 0).dy);
+      canvas.drawPath(path, arcPaint);
+      final spark = point(start + step * 2, -.8);
+      canvas.drawCircle(spark, 1.15, sparkPaint);
+    }
+  }
+
   void _shieldPickup(Canvas canvas, Offset center, double radius, double a) {
     final p = center + Offset(math.cos(a) * radius, math.sin(a) * radius);
     canvas.drawCircle(
@@ -3135,11 +3267,27 @@ class _OrbitPainter extends CustomPainter {
   }
 
   void _orbitMarkers(Canvas canvas, Offset center, List<double> radii) {
+    final colors = _orbitPalette(orbitSkin);
     final paint = Paint()
-      ..color = _orbitPalette(orbitSkin).marker.withValues(alpha: .35)
+      ..color = colors.marker.withValues(alpha: .35)
       ..strokeWidth = 1;
     for (int i = 0; i < 12; i++) {
       final angle = i * _fullTurn / 12;
+      if (colors.pattern == OrbitPattern.prism) {
+        const markerColors = [
+          Color(0xffff6fcf),
+          Color(0xffffc857),
+          Color(0xffa5ff79),
+          Color(0xff50e6ff),
+          Color(0xff7284ff),
+          Color(0xffc678ff),
+        ];
+        paint.color = markerColors[i % markerColors.length].withValues(
+          alpha: .62,
+        );
+      } else if (colors.pattern == OrbitPattern.radiant) {
+        paint.color = colors.marker.withValues(alpha: i.isEven ? .72 : .35);
+      }
       if (radii.length == 2) {
         _radialMark(
           canvas,
@@ -3161,6 +3309,31 @@ class _OrbitPainter extends CustomPainter {
       } else {
         for (final radius in radii) {
           _radialMark(canvas, center, radius - 2, radius + 2, angle, paint);
+        }
+      }
+      if (colors.pattern == OrbitPattern.pulsar && i % 3 == 0) {
+        for (final radius in radii) {
+          final pulse =
+              center +
+              Offset(math.cos(angle) * radius, math.sin(angle) * radius);
+          canvas.drawCircle(
+            pulse,
+            1.7,
+            Paint()..color = colors.highlight.withValues(alpha: .9),
+          );
+        }
+      } else if (colors.pattern == OrbitPattern.ion && i % 4 == 0) {
+        for (final radius in radii) {
+          final spark =
+              center +
+              Offset(math.cos(angle) * radius, math.sin(angle) * radius);
+          canvas.drawLine(
+            spark + const Offset(-2, 0),
+            spark + const Offset(2, 0),
+            Paint()
+              ..color = colors.highlight
+              ..strokeWidth = 1.2,
+          );
         }
       }
     }
@@ -3243,6 +3416,164 @@ class _OrbitPainter extends CustomPainter {
           ..strokeWidth = .65,
       );
     }
+    switch (colors.detail) {
+      case CoreDetail.classic:
+        break;
+      case CoreDetail.toxic:
+        for (final bubble in [
+          const Offset(-.42, .12),
+          const Offset(.38, -.32),
+          const Offset(.08, .46),
+        ]) {
+          final point = center + Offset(bubble.dx * r, bubble.dy * r);
+          c.drawCircle(
+            point,
+            r * .09,
+            Paint()
+              ..color = colors.highlight.withValues(alpha: .74)
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = .8,
+          );
+          c.drawCircle(
+            point + Offset(r * .025, -r * .025),
+            r * .025,
+            Paint()..color = colors.band.withValues(alpha: .8),
+          );
+        }
+      case CoreDetail.voidCore:
+        c.drawCircle(
+          center + Offset(r * .12, r * .08),
+          r * .3,
+          Paint()..color = colors.crater.withValues(alpha: .82),
+        );
+        for (final spark in [
+          const Offset(-.48, -.08),
+          const Offset(.43, -.25),
+          const Offset(-.12, .53),
+        ]) {
+          final point = center + Offset(spark.dx * r, spark.dy * r);
+          c.drawCircle(
+            point,
+            r * .045,
+            Paint()..color = colors.highlight.withValues(alpha: .9),
+          );
+        }
+      case CoreDetail.magma:
+        final cracks = [
+          [
+            const Offset(-.58, -.15),
+            const Offset(-.2, -.08),
+            const Offset(-.05, .1),
+            const Offset(.28, .16),
+          ],
+          [
+            const Offset(.05, -.58),
+            const Offset(.1, -.22),
+            const Offset(-.08, -.06),
+            const Offset(-.18, .25),
+          ],
+        ];
+        for (final points in cracks) {
+          final crack = Path()
+            ..moveTo(
+              center.dx + points.first.dx * r,
+              center.dy + points.first.dy * r,
+            );
+          for (final point in points.skip(1)) {
+            crack.lineTo(center.dx + point.dx * r, center.dy + point.dy * r);
+          }
+          c.drawPath(
+            crack,
+            Paint()
+              ..color = colors.highlight.withValues(alpha: .86)
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = r * .055,
+          );
+        }
+      case CoreDetail.ocean:
+        for (var i = 0; i < 3; i++) {
+          final y = center.dy + (i - 1) * r * .38;
+          final wave = Path()
+            ..moveTo(center.dx - r, y)
+            ..cubicTo(
+              center.dx - r * .5,
+              y - r * .22,
+              center.dx + r * .1,
+              y + r * .24,
+              center.dx + r,
+              y - r * .06,
+            );
+          c.drawPath(
+            wave,
+            Paint()
+              ..color = colors.highlight.withValues(alpha: .36)
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = r * .07,
+          );
+        }
+      case CoreDetail.rose:
+        for (var i = 0; i < 5; i++) {
+          final angle = i * _fullTurn / 5;
+          final petal =
+              center +
+              Offset(math.cos(angle) * r * .48, math.sin(angle) * r * .48);
+          c.drawCircle(
+            petal,
+            r * .12,
+            Paint()
+              ..color = colors.highlight.withValues(alpha: .36)
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = .8,
+          );
+        }
+      case CoreDetail.stellar:
+        for (final star in [
+          const Offset(-.38, -.28),
+          const Offset(.36, -.1),
+          const Offset(-.1, .43),
+        ]) {
+          final point = center + Offset(star.dx * r, star.dy * r);
+          c.drawLine(
+            point - Offset(r * .12, 0),
+            point + Offset(r * .12, 0),
+            Paint()
+              ..color = colors.highlight.withValues(alpha: .85)
+              ..strokeWidth = .8,
+          );
+          c.drawLine(
+            point - Offset(0, r * .12),
+            point + Offset(0, r * .12),
+            Paint()
+              ..color = colors.highlight.withValues(alpha: .85)
+              ..strokeWidth = .8,
+          );
+          c.drawCircle(point, r * .035, Paint()..color = Colors.white);
+        }
+      case CoreDetail.quantum:
+        final lattice = Path()
+          ..moveTo(center.dx, center.dy - r * .55)
+          ..lineTo(center.dx + r * .48, center.dy + r * .3)
+          ..lineTo(center.dx - r * .48, center.dy + r * .3)
+          ..close()
+          ..moveTo(center.dx - r * .48, center.dy - r * .3)
+          ..lineTo(center.dx + r * .48, center.dy - r * .3)
+          ..lineTo(center.dx, center.dy + r * .55);
+        c.drawPath(
+          lattice,
+          Paint()
+            ..color = colors.highlight.withValues(alpha: .56)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = r * .035,
+        );
+        c.drawCircle(
+          center,
+          r * .16,
+          Paint()
+            ..color = colors.band.withValues(alpha: .7)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = r * .05,
+        );
+    }
     c.restore();
     c.drawArc(
       Rect.fromCircle(center: center, radius: r - .8),
@@ -3317,7 +3648,10 @@ class _OrbitPainter extends CustomPainter {
   void _playerShip(Canvas canvas, Offset center, double radius, double angle) {
     final position =
         center + Offset(math.cos(angle) * radius, math.sin(angle) * radius);
-    final color = _skinColor(playerSkin);
+    final shipStyle = shipVisualStyles[playerSkin]!;
+    final color = Color(shipStyle.color);
+    final accent = Color(shipStyle.accent);
+    final trailStyle = trailVisualStyles[trailSkin]!;
     final particlePaints = _trailParticlePaints[trailSkin]!;
     final glowPaints = _trailGlowPaints[trailSkin]!;
     for (var i = 3; i >= 1; i--) {
@@ -3339,6 +3673,62 @@ class _OrbitPainter extends CustomPainter {
         particleRadius,
         particlePaints[particleIndex],
       );
+      final accentPaint = _trailAccentPaints[trailSkin]!;
+      switch (trailStyle.pattern) {
+        case TrailPattern.classic:
+        case TrailPattern.aurora:
+        case TrailPattern.solar:
+          break;
+        case TrailPattern.frost:
+          canvas.drawLine(
+            trailPoint + const Offset(-1.8, -1.8),
+            trailPoint + const Offset(1.8, 1.8),
+            accentPaint,
+          );
+          canvas.drawLine(
+            trailPoint + const Offset(-1.8, 1.8),
+            trailPoint + const Offset(1.8, -1.8),
+            accentPaint,
+          );
+        case TrailPattern.phantom:
+          canvas.drawCircle(
+            trailPoint + Offset(-particleRadius * .4, particleRadius * .3),
+            particleRadius * .45,
+            accentPaint,
+          );
+        case TrailPattern.electric:
+          canvas.drawLine(
+            trailPoint + const Offset(-2.8, .8),
+            trailPoint + const Offset(2.8, -.8),
+            accentPaint..strokeWidth = 1.2,
+          );
+        case TrailPattern.ember:
+          canvas.drawCircle(
+            trailPoint + Offset(particleRadius * .45, particleRadius * .5),
+            particleRadius * .32,
+            accentPaint,
+          );
+        case TrailPattern.stardust:
+          canvas.drawCircle(
+            trailPoint + const Offset(2, -1.8),
+            .8,
+            accentPaint,
+          );
+        case TrailPattern.toxic:
+          canvas.drawCircle(
+            trailPoint + Offset(-particleRadius * .45, -particleRadius * .4),
+            particleRadius * .36,
+            accentPaint
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = .65,
+          );
+        case TrailPattern.spectrum:
+          canvas.drawCircle(
+            trailPoint + const Offset(0, -2),
+            particleRadius * .32,
+            accentPaint,
+          );
+      }
     }
     canvas.drawCircle(
       position,
@@ -3346,11 +3736,11 @@ class _OrbitPainter extends CustomPainter {
       Paint()..color = color.withValues(alpha: .16),
     );
     final path = Path();
-    switch (playerSkin) {
-      case ShipSkinId.defaultSkin:
+    switch (shipStyle.silhouette) {
+      case ShipSilhouette.orb:
         canvas.drawCircle(position, 8, Paint()..color = color);
         break;
-      case ShipSkinId.emerald:
+      case ShipSilhouette.diamond:
         path
           ..moveTo(position.dx, position.dy - 8)
           ..lineTo(position.dx + 7, position.dy)
@@ -3359,7 +3749,7 @@ class _OrbitPainter extends CustomPainter {
           ..close();
         canvas.drawPath(path, Paint()..color = color);
         break;
-      case ShipSkinId.nebula:
+      case ShipSilhouette.nebula:
         canvas.drawCircle(
           position,
           7,
@@ -3379,23 +3769,143 @@ class _OrbitPainter extends CustomPainter {
           Paint()..color = Colors.white,
         );
         break;
-      case ShipSkinId.solar:
-      case ShipSkinId.supernova:
-        final points = playerSkin == ShipSkinId.solar ? 8 : 10;
-        for (var i = 0; i < points; i++) {
-          final r = i.isEven
-              ? 8.0
-              : (playerSkin == ShipSkinId.solar ? 5.5 : 3.8);
-          final a = angle + i * math.pi / points - math.pi / 2;
-          final point = position + Offset(math.cos(a) * r, math.sin(a) * r);
-          if (i == 0) {
-            path.moveTo(point.dx, point.dy);
-          } else {
-            path.lineTo(point.dx, point.dy);
-          }
-        }
-        path.close();
+      case ShipSilhouette.solarStar:
+        _shipStar(canvas, position, angle, color, points: 8, innerRadius: 5.5);
+        break;
+      case ShipSilhouette.supernova:
+        _shipStar(canvas, position, angle, color, points: 10, innerRadius: 3.8);
+        break;
+      case ShipSilhouette.obsidian:
+        path.addPolygon(_shipPolygon(position, angle, 6, 8, 8), true);
         canvas.drawPath(path, Paint()..color = color);
+        canvas.drawPath(
+          path,
+          Paint()
+            ..color = accent
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.35,
+        );
+        canvas.drawPath(
+          Path()
+            ..moveTo(position.dx, position.dy - 4)
+            ..lineTo(position.dx + 3.5, position.dy)
+            ..lineTo(position.dx, position.dy + 4)
+            ..lineTo(position.dx - 3.5, position.dy)
+            ..close(),
+          Paint()..color = accent,
+        );
+        break;
+      case ShipSilhouette.prism:
+        final vertices = _shipPolygon(position, angle, 6, 8, 8);
+        path.addPolygon(vertices, true);
+        canvas.drawPath(path, Paint()..color = color);
+        final facets = [
+          const Color(0xffff71ce),
+          const Color(0xffffd45e),
+          const Color(0xff55f4db),
+        ];
+        for (var i = 0; i < 3; i++) {
+          final facet = Path()
+            ..moveTo(position.dx, position.dy)
+            ..lineTo(vertices[i * 2].dx, vertices[i * 2].dy)
+            ..lineTo(
+              vertices[(i * 2 + 1) % vertices.length].dx,
+              vertices[(i * 2 + 1) % vertices.length].dy,
+            )
+            ..close();
+          canvas.drawPath(
+            facet,
+            Paint()..color = facets[i].withValues(alpha: .72),
+          );
+        }
+        canvas.drawPath(
+          path,
+          Paint()
+            ..color = accent
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1,
+        );
+        break;
+      case ShipSilhouette.inferno:
+        path
+          ..moveTo(position.dx, position.dy - 9)
+          ..quadraticBezierTo(
+            position.dx + 8,
+            position.dy - 3,
+            position.dx + 5.5,
+            position.dy + 5,
+          )
+          ..quadraticBezierTo(
+            position.dx,
+            position.dy + 10,
+            position.dx - 5.5,
+            position.dy + 5,
+          )
+          ..quadraticBezierTo(
+            position.dx - 8,
+            position.dy - 3,
+            position.dx,
+            position.dy - 9,
+          )
+          ..close();
+        canvas.drawPath(path, Paint()..color = color);
+        canvas.drawPath(
+          Path()
+            ..moveTo(position.dx, position.dy - 4)
+            ..quadraticBezierTo(
+              position.dx + 4,
+              position.dy + 1,
+              position.dx,
+              position.dy + 5,
+            )
+            ..quadraticBezierTo(
+              position.dx - 3,
+              position.dy + 1,
+              position.dx,
+              position.dy - 4,
+            )
+            ..close(),
+          Paint()..color = accent,
+        );
+        break;
+      case ShipSilhouette.frostbite:
+        final crystal = _shipPolygon(position, angle, 8, 8, 2.8);
+        path.addPolygon(crystal, true);
+        canvas.drawPath(path, Paint()..color = color);
+        canvas.drawPath(
+          path,
+          Paint()
+            ..color = accent
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1,
+        );
+        for (var i = 0; i < 4; i++) {
+          final tip = crystal[i * 2];
+          canvas.drawLine(position, tip, Paint()..color = accent);
+        }
+        break;
+      case ShipSilhouette.phantom:
+        canvas.drawCircle(position, 7.5, Paint()..color = color);
+        canvas.drawCircle(
+          position + const Offset(4, -2),
+          6.5,
+          Paint()..color = const Color(0xff070b18),
+        );
+        canvas.drawArc(
+          Rect.fromCircle(center: position, radius: 8.5),
+          math.pi * .8,
+          math.pi * 1.25,
+          false,
+          Paint()
+            ..color = accent
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.4,
+        );
+        canvas.drawCircle(
+          position + const Offset(-3, 2),
+          1.3,
+          Paint()..color = accent,
+        );
         break;
     }
     canvas.drawCircle(
@@ -3403,6 +3913,47 @@ class _OrbitPainter extends CustomPainter {
       2.8,
       Paint()..color = Colors.white.withValues(alpha: .92),
     );
+  }
+
+  List<Offset> _shipPolygon(
+    Offset center,
+    double rotation,
+    int points,
+    double outerRadius,
+    double innerRadius,
+  ) => [
+    for (var i = 0; i < points; i++)
+      center +
+          Offset(
+            math.cos(rotation + i * _fullTurn / points - math.pi / 2) *
+                (i.isEven ? outerRadius : innerRadius),
+            math.sin(rotation + i * _fullTurn / points - math.pi / 2) *
+                (i.isEven ? outerRadius : innerRadius),
+          ),
+  ];
+
+  void _shipStar(
+    Canvas canvas,
+    Offset center,
+    double rotation,
+    Color color, {
+    required int points,
+    required double innerRadius,
+  }) {
+    final path = Path();
+    for (var i = 0; i < points; i++) {
+      final radius = i.isEven ? 8.0 : innerRadius;
+      final angle = rotation + i * math.pi / points - math.pi / 2;
+      final point =
+          center + Offset(math.cos(angle) * radius, math.sin(angle) * radius);
+      if (i == 0) {
+        path.moveTo(point.dx, point.dy);
+      } else {
+        path.lineTo(point.dx, point.dy);
+      }
+    }
+    path.close();
+    canvas.drawPath(path, Paint()..color = color);
   }
 
   void _gem(Canvas c, Offset center, double r, double a) {
@@ -3573,10 +4124,18 @@ class _FeatureWriteFailure {
 }
 
 class _OrbitColors {
-  const _OrbitColors(this.glow, this.stroke, this.marker);
+  const _OrbitColors(
+    this.glow,
+    this.stroke,
+    this.marker,
+    this.highlight,
+    this.pattern,
+  );
   final Color glow;
   final Color stroke;
   final Color marker;
+  final Color highlight;
+  final OrbitPattern pattern;
 }
 
 class _CoreColors {
@@ -3588,6 +4147,7 @@ class _CoreColors {
     required this.craterRim,
     required this.highlight,
     required this.outline,
+    required this.detail,
   });
   final Color glow;
   final List<Color> gradient;
@@ -3596,82 +4156,41 @@ class _CoreColors {
   final Color craterRim;
   final Color highlight;
   final Color outline;
+  final CoreDetail detail;
 }
 
-_OrbitColors _orbitPalette(OrbitSkinId skin) => switch (skin) {
-  OrbitSkinId.defaultOrbit => const _OrbitColors(
-    Color(0xff50dff8),
-    Color(0xff75dcf5),
-    Color(0xff8cecff),
-  ),
-  OrbitSkinId.aurora => const _OrbitColors(
-    Color(0xff39ed9d),
-    Color(0xff75f0b7),
-    Color(0xffa2ffd0),
-  ),
-  OrbitSkinId.solar => const _OrbitColors(
-    Color(0xffffa83b),
-    Color(0xffffd078),
-    Color(0xffffe2a6),
-  ),
+final Map<OrbitSkinId, _OrbitColors> _orbitPalettes = {
+  for (final entry in orbitVisualStyles.entries)
+    entry.key: _OrbitColors(
+      Color(entry.value.glow),
+      Color(entry.value.stroke),
+      Color(entry.value.marker),
+      Color(entry.value.highlight),
+      entry.value.pattern,
+    ),
 };
 
-_CoreColors _corePalette(CoreSkinId skin) => switch (skin) {
-  CoreSkinId.defaultCore => const _CoreColors(
-    glow: Color(0xff455cff),
-    gradient: [
-      Color(0xffd8a0ff),
-      Color(0xff5f56bb),
-      Color(0xff201d54),
-      Color(0xff10152f),
-    ],
-    band: Color(0xffd9bdff),
-    crater: Color(0xff17183e),
-    craterRim: Color(0xffe4caff),
-    highlight: Color(0xfff0d5ff),
-    outline: Color(0xffa9a0ff),
-  ),
-  CoreSkinId.crimson => const _CoreColors(
-    glow: Color(0xffef412f),
-    gradient: [
-      Color(0xffffbd8e),
-      Color(0xffd94d3f),
-      Color(0xff70242f),
-      Color(0xff281521),
-    ],
-    band: Color(0xffffa47c),
-    crater: Color(0xff481c2a),
-    craterRim: Color(0xffffb28c),
-    highlight: Color(0xffffc3a1),
-    outline: Color(0xffff765f),
-  ),
-  CoreSkinId.glacier => const _CoreColors(
-    glow: Color(0xff46cfff),
-    gradient: [
-      Color(0xffe2ffff),
-      Color(0xff6bc9e8),
-      Color(0xff24638f),
-      Color(0xff101e3a),
-    ],
-    band: Color(0xffc1f7ff),
-    crater: Color(0xff163c62),
-    craterRim: Color(0xffd8ffff),
-    highlight: Color(0xffd6ffff),
-    outline: Color(0xff79e7ff),
-  ),
+_OrbitColors _orbitPalette(OrbitSkinId skin) => _orbitPalettes[skin]!;
+
+final Map<CoreSkinId, _CoreColors> _corePalettes = {
+  for (final entry in coreVisualStyles.entries)
+    entry.key: _CoreColors(
+      glow: Color(entry.value.glow),
+      gradient: entry.value.gradient.map(Color.new).toList(growable: false),
+      band: Color(entry.value.band),
+      crater: Color(entry.value.crater),
+      craterRim: Color(entry.value.craterRim),
+      highlight: Color(entry.value.highlight),
+      outline: Color(entry.value.outline),
+      detail: entry.value.detail,
+    ),
 };
 
-Color _orbitColor(OrbitSkinId skin) => switch (skin) {
-  OrbitSkinId.defaultOrbit => const Color(0xff50dff8),
-  OrbitSkinId.aurora => const Color(0xff39ed9d),
-  OrbitSkinId.solar => const Color(0xffffa83b),
-};
+_CoreColors _corePalette(CoreSkinId skin) => _corePalettes[skin]!;
 
-Color _coreColor(CoreSkinId skin) => switch (skin) {
-  CoreSkinId.defaultCore => const Color(0xffa9a0ff),
-  CoreSkinId.crimson => const Color(0xffff765f),
-  CoreSkinId.glacier => const Color(0xff79e7ff),
-};
+Color _orbitColor(OrbitSkinId skin) => _orbitPalette(skin).glow;
+
+Color _coreColor(CoreSkinId skin) => _corePalette(skin).outline;
 
 extension on CosmeticShopCategory {
   String get label => switch (this) {
@@ -3691,10 +4210,4 @@ extension on CosmeticShopCategory {
 
 Color _trailColor(TrailSkinId skin) => Color(trailVisualStyles[skin]!.color);
 
-Color _skinColor(ShipSkinId skin) => switch (skin) {
-  ShipSkinId.defaultSkin => const Color(0xff60efff),
-  ShipSkinId.emerald => const Color(0xff66f0a5),
-  ShipSkinId.nebula => const Color(0xffbe86ff),
-  ShipSkinId.solar => const Color(0xffffb54d),
-  ShipSkinId.supernova => const Color(0xffff6fcf),
-};
+Color _skinColor(ShipSkinId skin) => Color(shipVisualStyles[skin]!.color);
