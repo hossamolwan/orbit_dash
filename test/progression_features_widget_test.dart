@@ -16,7 +16,7 @@ void main() {
     SharedPreferences.setMockInitialValues({
       AchievementStore.totalGemsKey: 25,
       GemWallet.stateKey:
-          '{"version":1,"balance":25,"grants":[],"purchases":{}}',
+          '{"version":1,"balance":40,"grants":[],"purchases":{}}',
       'orbit_dash_best': 7,
     });
     final driver = OrbitGameTestDriver();
@@ -40,7 +40,7 @@ void main() {
       findsOneWidget,
     );
     expect(find.byKey(const ValueKey('skin-option-supernova')), findsOneWidget);
-    expect(find.textContaining('NEED 50 MORE'), findsOneWidget);
+    expect(find.textContaining('NEED 60 MORE'), findsOneWidget);
     expect(
       tester
           .widget<OutlinedButton>(

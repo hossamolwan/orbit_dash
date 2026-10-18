@@ -46,7 +46,7 @@ const shipSkins = <ShipSkin>[
     description: 'A bright emerald trail.',
     category: CosmeticCategory.ship,
     rarity: CosmeticRarity.standard,
-    price: 25,
+    price: 40,
   ),
   ShipSkin(
     id: ShipSkinId.nebula,
@@ -54,7 +54,7 @@ const shipSkins = <ShipSkin>[
     description: 'A shimmering nebula glow.',
     category: CosmeticCategory.ship,
     rarity: CosmeticRarity.standard,
-    price: 75,
+    price: 100,
   ),
   ShipSkin(
     id: ShipSkinId.solar,
@@ -62,7 +62,7 @@ const shipSkins = <ShipSkin>[
     description: 'A warm solar flare.',
     category: CosmeticCategory.ship,
     rarity: CosmeticRarity.premium,
-    price: 150,
+    price: 250,
   ),
   ShipSkin(
     id: ShipSkinId.supernova,
@@ -70,7 +70,7 @@ const shipSkins = <ShipSkin>[
     description: 'A vivid supernova burst.',
     category: CosmeticCategory.ship,
     rarity: CosmeticRarity.premium,
-    price: 300,
+    price: 500,
   ),
 ];
 
@@ -108,7 +108,7 @@ const orbitSkins = <OrbitSkin>[
     name: 'Aurora Orbit',
     description: 'An emerald orbital glow.',
     rarity: CosmeticRarity.standard,
-    price: 40,
+    price: 60,
   ),
   OrbitSkin(
     id: OrbitSkinId.solar,
@@ -116,7 +116,7 @@ const orbitSkins = <OrbitSkin>[
     name: 'Solar Orbit',
     description: 'A golden solar flare.',
     rarity: CosmeticRarity.premium,
-    price: 175,
+    price: 275,
   ),
 ];
 
@@ -154,7 +154,7 @@ const coreSkins = <CoreSkin>[
     name: 'Crimson Core',
     description: 'A blazing crimson surface.',
     rarity: CosmeticRarity.standard,
-    price: 50,
+    price: 75,
   ),
   CoreSkin(
     id: CoreSkinId.glacier,
@@ -162,7 +162,7 @@ const coreSkins = <CoreSkin>[
     name: 'Glacier Core',
     description: 'An icy blue core.',
     rarity: CosmeticRarity.premium,
-    price: 200,
+    price: 300,
   ),
 ];
 

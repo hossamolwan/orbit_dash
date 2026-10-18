@@ -52,7 +52,7 @@ void main() {
     await tester.ensureVisible(aurora);
     await tester.tap(aurora);
     await tester.pumpAndSettle();
-    expect(driver.walletBalance, 260);
+    expect(driver.walletBalance, 240);
     expect(driver.selectedOrbit, OrbitSkinId.defaultOrbit);
     await tester.ensureVisible(aurora);
     await tester.tap(aurora);
@@ -63,7 +63,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(driver.selectedSkin, ShipSkinId.defaultSkin);
     expect(driver.selectedOrbit, OrbitSkinId.aurora);
-    expect(driver.walletBalance, 260);
+    expect(driver.walletBalance, 240);
     expect(
       find.byKey(const ValueKey('skin-option-defaultSkin')),
       findsOneWidget,
@@ -83,12 +83,12 @@ void main() {
     await tester.ensureVisible(crimson);
     await tester.tap(crimson);
     await tester.pumpAndSettle();
-    expect(driver.walletBalance, 210);
+    expect(driver.walletBalance, 165);
     expect(driver.selectedCore, CoreSkinId.defaultCore);
     await tester.ensureVisible(crimson);
     await tester.tap(crimson);
     await tester.pumpAndSettle();
-    expect(driver.walletBalance, 210);
+    expect(driver.walletBalance, 165);
     expect(driver.selectedCore, CoreSkinId.crimson);
     expect(
       find.byKey(const ValueKey('orbit-style-aurora-crimson')),
@@ -100,7 +100,7 @@ void main() {
     expect(preferences.getString(AppearanceStore.selectedCoreKey), 'crimson');
     final restoredWallet = GemWallet();
     await restoredWallet.load();
-    expect(restoredWallet.balance, 210);
+    expect(restoredWallet.balance, 165);
     expect(restoredWallet.owns('orbit.aurora'), isTrue);
     expect(restoredWallet.owns('core.crimson'), isTrue);
     await tester.pumpWidget(const SizedBox.shrink());

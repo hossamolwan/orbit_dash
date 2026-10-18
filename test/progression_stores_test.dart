@@ -86,8 +86,8 @@ void main() {
       () async {
         final wallet = GemWallet();
         await wallet.load();
-        expect(await wallet.creditPickupOnce('pickup:1', 200), isTrue);
-        expect(await wallet.purchase(itemId: 'ship.solar', price: 150), isTrue);
+        expect(await wallet.creditPickupOnce('pickup:1', 300), isTrue);
+        expect(await wallet.purchase(itemId: 'ship.solar', price: 250), isTrue);
         final restored = GemWallet();
         await restored.load();
         expect(restored.balance, 50);
@@ -100,17 +100,26 @@ void main() {
       final wallet = GemWallet();
       await wallet.load();
       expect(await wallet.creditPickupOnce('bad', -1), isFalse);
-      expect(await wallet.purchase(itemId: 'ship.emerald', price: 25), isFalse);
-      await wallet.creditPickupOnce('reward', 25);
-      expect(await wallet.purchase(itemId: 'ship.emerald', price: 25), isTrue);
-      expect(await wallet.purchase(itemId: 'ship.emerald', price: 25), isFalse);
+      expect(await wallet.purchase(itemId: 'ship.emerald', price: 40), isFalse);
+      await wallet.creditPickupOnce('reward', 40);
+      expect(await wallet.purchase(itemId: 'ship.emerald', price: 40), isTrue);
+      expect(await wallet.purchase(itemId: 'ship.emerald', price: 40), isFalse);
       expect(wallet.balance, 0);
     });
 
     test(
       'purchase ledger supports standard and premium catalog entries',
       () async {
-        expect(shipSkins.map((skin) => skin.price), [0, 25, 75, 150, 300]);
+        expect(shipSkins.map((skin) => skin.price), [0, 40, 100, 250, 500]);
+        expect(
+          shipSkins
+              .map((skin) => skin.price)
+              .followedBy(orbitSkins.map((skin) => skin.price))
+              .followedBy(coreSkins.map((skin) => skin.price))
+              .where((price) => price > 0)
+              .fold<int>(0, (total, price) => total + price),
+          1600,
+        );
         expect(shipSkins[1].rarity, CosmeticRarity.standard);
         expect(shipSkins[3].rarity, CosmeticRarity.premium);
         final wallet = GemWallet();
@@ -130,7 +139,7 @@ void main() {
           ),
           isTrue,
         );
-        expect(wallet.balance, 200);
+        expect(wallet.balance, 85);
       },
     );
 
@@ -142,7 +151,7 @@ void main() {
           'orbit.aurora',
           'orbit.solar',
         ]);
-        expect(orbitSkins.map((skin) => skin.price), [0, 40, 175]);
+        expect(orbitSkins.map((skin) => skin.price), [0, 60, 275]);
         expect(
           orbitSkins.every((skin) => skin.category == CosmeticCategory.orbit),
           isTrue,
@@ -154,7 +163,7 @@ void main() {
           'core.crimson',
           'core.glacier',
         ]);
-        expect(coreSkins.map((skin) => skin.price), [0, 50, 200]);
+        expect(coreSkins.map((skin) => skin.price), [0, 75, 300]);
         expect(
           coreSkins.every((skin) => skin.category == CosmeticCategory.core),
           isTrue,
@@ -177,7 +186,7 @@ void main() {
       () async {
         final wallet = GemWallet();
         await wallet.load();
-        await wallet.creditPickupOnce('gift', 465);
+        await wallet.creditPickupOnce('gift', 710);
         for (final skin in orbitSkins.skip(1)) {
           expect(
             await wallet.purchase(itemId: skin.itemId, price: skin.price),
@@ -192,7 +201,7 @@ void main() {
         }
         expect(wallet.balance, 0);
         expect(
-          await wallet.purchase(itemId: 'orbit.aurora', price: 40),
+          await wallet.purchase(itemId: 'orbit.aurora', price: 60),
           isFalse,
         );
 
@@ -265,8 +274,8 @@ void main() {
     test('persists equipped skin and ignores legacy ownership keys', () async {
       final wallet = GemWallet();
       await wallet.load();
-      await wallet.creditPickupOnce('gift', 25);
-      await wallet.purchase(itemId: 'ship.emerald', price: 25);
+      await wallet.creditPickupOnce('gift', 40);
+      await wallet.purchase(itemId: 'ship.emerald', price: 40);
       final skins = SkinStore();
       await skins.load(ownedItemIds: wallet.purchasedItemIds);
       expect(
