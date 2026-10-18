@@ -1,74 +1,207 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:orbit_dash/achievements.dart';
 import 'package:orbit_dash/player_statistics.dart';
+import 'package:orbit_dash/gem_wallet.dart';
 import 'package:orbit_dash/skins.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  group('skin store', () {
+  group('gem wallet and skin catalog', () {
     test(
-      'unlocks skins from approved lifetime and stage requirements',
+      'pickup deduplication stays in memory and does not grow saved state',
       () async {
-        final store = SkinStore();
-        await store.load(lifetimeGems: 24, completedStages: {1, 2});
-        expect(store.unlockedSkins, {ShipSkinId.defaultSkin});
-
-        await store.updateProgress(lifetimeGems: 25, completedStages: {1, 2});
-        expect(store.isUnlocked(ShipSkinId.emerald), isTrue);
-        expect(store.isUnlocked(ShipSkinId.nebula), isFalse);
-        expect(store.isUnlocked(ShipSkinId.solar), isFalse);
-
-        await store.updateProgress(
-          lifetimeGems: 75,
-          completedStages: {1, 2, 3},
+        final wallet = GemWallet();
+        await wallet.load();
+        for (var index = 0; index < 100; index++) {
+          expect(await wallet.creditPickupOnce('pickup:$index', 1), isTrue);
+        }
+        expect(await wallet.creditPickupOnce('pickup:99', 1), isFalse);
+        final prefs = await SharedPreferences.getInstance();
+        final saved = jsonDecode(
+          prefs.getString(GemWallet.stateKey)!,
+        ) as Map<String, dynamic>;
+        expect(saved['balance'], 100);
+        expect(saved['dailyRewardIds'], isEmpty);
+        expect(saved.containsKey('grants'), isFalse);
+        expect(
+          prefs.getString(GemWallet.stateKey)!.contains('pickup:'),
+          isFalse,
         );
-        expect(store.isUnlocked(ShipSkinId.nebula), isTrue);
-        expect(store.isUnlocked(ShipSkinId.solar), isTrue);
-        expect(store.isUnlocked(ShipSkinId.supernova), isFalse);
-
-        await store.updateProgress(
-          lifetimeGems: 75,
-          completedStages: {1, 2, 3, 5},
-        );
-        expect(store.isUnlocked(ShipSkinId.supernova), isTrue);
       },
     );
 
     test(
-      'persists selection and rejects locked or invalid selections',
+      'upgrades an existing ledger while keeping only daily reward IDs',
       () async {
-        final store = SkinStore();
-        await store.load(lifetimeGems: 25, completedStages: {});
-        expect(await store.select(ShipSkinId.nebula), isFalse);
-        expect(await store.select(ShipSkinId.emerald), isTrue);
-
-        final restored = SkinStore();
-        await restored.load(lifetimeGems: 25, completedStages: {});
-        expect(restored.selectedSkin, ShipSkinId.emerald);
-
         SharedPreferences.setMockInitialValues({
-          SkinStore.unlockedSkinsKey: ['unknown'],
-          SkinStore.selectedSkinKey: 'unknown',
+          GemWallet.stateKey: jsonEncode({
+            'version': 1,
+            'balance': 17,
+            'grants': [
+              'pickup:old-run:1',
+              'daily:2026-10-17:collect_gems',
+              'daily:2026-10-16:start_runs',
+            ],
+            'purchases': {'ship.emerald': 25},
+          }),
         });
-        final invalid = SkinStore();
-        await invalid.load(lifetimeGems: 0, completedStages: {});
-        expect(invalid.unlockedSkins, {ShipSkinId.defaultSkin});
-        expect(invalid.selectedSkin, ShipSkinId.defaultSkin);
+        final wallet = GemWallet();
+        await wallet.load();
+        final prefs = await SharedPreferences.getInstance();
+        final saved = jsonDecode(
+          prefs.getString(GemWallet.stateKey)!,
+        ) as Map<String, dynamic>;
+        expect(wallet.balance, 17);
+        expect(wallet.owns('ship.emerald'), isTrue);
+        expect(saved['version'], 2);
+        expect(saved['dailyRewardIds'], ['collect_gems']);
+        expect(
+          prefs.getString(GemWallet.stateKey)!.contains('pickup:'),
+          isFalse,
+        );
+      },
+    );
+
+    test('starts at zero and ignores legacy gems and skin unlocks', () async {
+      SharedPreferences.setMockInitialValues({
+        'orbit_dash_total_gems': 900,
+        'orbit_dash_unlocked_skins_v1': ['emerald', 'supernova'],
+        'orbit_dash_selected_skin_v1': 'supernova',
+      });
+      final wallet = GemWallet();
+      await wallet.load();
+      expect(wallet.balance, 0);
+      final skins = SkinStore();
+      await skins.load(ownedItemIds: wallet.purchasedItemIds);
+      expect(skins.selectedSkin, ShipSkinId.defaultSkin);
+      expect(wallet.purchasedItemIds, isEmpty);
+    });
+
+    test(
+      'persists wallet balance and purchases across reinitialization',
+      () async {
+        final wallet = GemWallet();
+        await wallet.load();
+        expect(await wallet.creditPickupOnce('pickup:1', 200), isTrue);
+        expect(await wallet.purchase(itemId: 'ship.solar', price: 150), isTrue);
+        final restored = GemWallet();
+        await restored.load();
+        expect(restored.balance, 50);
+        expect(restored.owns('ship.solar'), isTrue);
+        expect(restored.balance, 50);
+      },
+    );
+
+    test('rejects invalid, unaffordable and duplicate purchases', () async {
+      final wallet = GemWallet();
+      await wallet.load();
+      expect(await wallet.creditPickupOnce('bad', -1), isFalse);
+      expect(await wallet.purchase(itemId: 'ship.emerald', price: 25), isFalse);
+      await wallet.creditPickupOnce('reward', 25);
+      expect(await wallet.purchase(itemId: 'ship.emerald', price: 25), isTrue);
+      expect(await wallet.purchase(itemId: 'ship.emerald', price: 25), isFalse);
+      expect(wallet.balance, 0);
+    });
+
+    test(
+      'purchase ledger supports standard and premium catalog entries',
+      () async {
+        expect(shipSkins.map((skin) => skin.price), [0, 25, 75, 150, 300]);
+        expect(shipSkins[1].rarity, CosmeticRarity.standard);
+        expect(shipSkins[3].rarity, CosmeticRarity.premium);
+        final wallet = GemWallet();
+        await wallet.load();
+        await wallet.creditPickupOnce('gift', 375);
+        expect(
+          await wallet.purchase(
+            itemId: shipSkins[1].itemId,
+            price: shipSkins[1].price,
+          ),
+          isTrue,
+        );
+        expect(
+          await wallet.purchase(
+            itemId: shipSkins[3].itemId,
+            price: shipSkins[3].price,
+          ),
+          isTrue,
+        );
+        expect(wallet.balance, 200);
+      },
+    );
+
+    test('persists equipped skin and ignores legacy ownership keys', () async {
+      final wallet = GemWallet();
+      await wallet.load();
+      await wallet.creditPickupOnce('gift', 25);
+      await wallet.purchase(itemId: 'ship.emerald', price: 25);
+      final skins = SkinStore();
+      await skins.load(ownedItemIds: wallet.purchasedItemIds);
+      expect(
+        await skins.select(
+          ShipSkinId.emerald,
+          ownedItemIds: wallet.purchasedItemIds,
+        ),
+        isTrue,
+      );
+      final restored = SkinStore();
+      await restored.load(ownedItemIds: wallet.purchasedItemIds);
+      expect(restored.selectedSkin, ShipSkinId.emerald);
+      expect(
+        await restored.select(
+          ShipSkinId.supernova,
+          ownedItemIds: wallet.purchasedItemIds,
+        ),
+        isFalse,
+      );
+    });
+
+    test(
+      'malformed wallet data resets cleanly and lifetime stats stay separate',
+      () async {
+        SharedPreferences.setMockInitialValues({
+          GemWallet.stateKey: '{broken',
+          'orbit_dash_total_gems': 40,
+        });
+        final wallet = GemWallet();
+        await wallet.load();
+        expect(wallet.balance, 0);
+        final achievement = AchievementStore();
+        await achievement.load();
+        expect(achievement.totalGems, 40);
+        await wallet
+            .purchase(itemId: 'ship.x', price: -1)
+            .then((result) => expect(result, isFalse));
       },
     );
 
     test(
-      'invalid preference types safely fall back to the default skin',
+      'failed persistence never reports a pickup or purchase as successful',
       () async {
-        SharedPreferences.setMockInitialValues({
-          SkinStore.unlockedSkinsKey: 7,
-          SkinStore.selectedSkinKey: 7,
-        });
-        final store = SkinStore();
-        await store.load(lifetimeGems: 0, completedStages: {});
-        expect(store.unlockedSkins, {ShipSkinId.defaultSkin});
-        expect(store.selectedSkin, ShipSkinId.defaultSkin);
+        final prefs = await SharedPreferences.getInstance();
+        var fail = false;
+        final wallet = GemWallet(
+          loadPreferences: () async {
+            if (fail) throw StateError('simulated persistence failure');
+            return prefs;
+          },
+        );
+        await wallet.load();
+        fail = true;
+        await expectLater(
+          wallet.creditPickupOnce('pickup:failed', 1),
+          throwsStateError,
+        );
+        await expectLater(
+          wallet.purchase(itemId: 'ship.emerald', price: 1),
+          throwsStateError,
+        );
+        expect(wallet.balance, 0);
+        expect(wallet.owns('ship.emerald'), isFalse);
       },
     );
   });

@@ -2,6 +2,10 @@ import 'dart:async';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+enum CosmeticCategory { ship }
+
+enum CosmeticRarity { standard, premium }
+
 enum ShipSkinId { defaultSkin, emerald, nebula, solar, supernova }
 
 class ShipSkin {
@@ -9,52 +13,60 @@ class ShipSkin {
     required this.id,
     required this.name,
     required this.description,
-    required this.gemRequirement,
-    required this.stageRequirement,
+    required this.category,
+    required this.rarity,
+    required this.price,
   });
-
   final ShipSkinId id;
+  String get itemId => 'ship.${id.name}';
   final String name;
   final String description;
-  final int? gemRequirement;
-  final int? stageRequirement;
+  final CosmeticCategory category;
+  final CosmeticRarity rarity;
+  final int price;
 }
 
+/// Central catalog. New cosmetic categories can join this catalog later.
 const shipSkins = <ShipSkin>[
   ShipSkin(
     id: ShipSkinId.defaultSkin,
     name: 'Default',
     description: 'The original orbital glow.',
-    gemRequirement: null,
-    stageRequirement: null,
+    category: CosmeticCategory.ship,
+    rarity: CosmeticRarity.standard,
+    price: 0,
   ),
   ShipSkin(
     id: ShipSkinId.emerald,
     name: 'Emerald',
-    description: 'Collect 25 lifetime gems.',
-    gemRequirement: 25,
-    stageRequirement: null,
+    description: 'A bright emerald trail.',
+    category: CosmeticCategory.ship,
+    rarity: CosmeticRarity.standard,
+    price: 25,
   ),
   ShipSkin(
     id: ShipSkinId.nebula,
     name: 'Nebula',
-    description: 'Collect 75 lifetime gems.',
-    gemRequirement: 75,
-    stageRequirement: null,
+    description: 'A shimmering nebula glow.',
+    category: CosmeticCategory.ship,
+    rarity: CosmeticRarity.standard,
+    price: 75,
   ),
   ShipSkin(
     id: ShipSkinId.solar,
     name: 'Solar',
-    description: 'Complete Stage 3.',
-    gemRequirement: null,
-    stageRequirement: 3,
+    description: 'A warm solar flare.',
+    category: CosmeticCategory.ship,
+    rarity: CosmeticRarity.premium,
+    price: 150,
   ),
   ShipSkin(
     id: ShipSkinId.supernova,
     name: 'Supernova',
-    description: 'Complete Stage 5.',
-    gemRequirement: null,
-    stageRequirement: 5,
+    description: 'A vivid supernova burst.',
+    category: CosmeticCategory.ship,
+    rarity: CosmeticRarity.premium,
+    price: 300,
   ),
 ];
 
@@ -62,94 +74,45 @@ class SkinStore {
   SkinStore({Future<SharedPreferences> Function()? loadPreferences})
     : _loadPreferences = loadPreferences ?? SharedPreferences.getInstance;
 
-  static const unlockedSkinsKey = 'orbit_dash_unlocked_skins_v1';
-  static const selectedSkinKey = 'orbit_dash_selected_skin_v1';
-
+  // Versioned keys intentionally ignore historical unlock and selection data.
+  static const selectedSkinKey = 'orbit_dash_selected_skin_v2';
   final Future<SharedPreferences> Function() _loadPreferences;
-  final Set<ShipSkinId> _unlocked = {ShipSkinId.defaultSkin};
   ShipSkinId _selected = ShipSkinId.defaultSkin;
   Future<void> _tail = Future<void>.value();
-
-  Set<ShipSkinId> get unlockedSkins => Set.unmodifiable(_unlocked);
   ShipSkinId get selectedSkin => _selected;
-  bool isUnlocked(ShipSkinId id) => _unlocked.contains(id);
   Future<void> flush() => _tail;
 
-  Future<void> load({
-    required int lifetimeGems,
-    required Set<int> completedStages,
-  }) => _serialize(() async {
-    final preferences = await _loadPreferences();
-    final saved = _readUnlocked(preferences);
-    _unlocked
-      ..clear()
-      ..add(ShipSkinId.defaultSkin)
-      ..addAll(saved);
-    _unlockEligible(lifetimeGems, completedStages);
-    final selectedValue = _readSelected(preferences);
-    ShipSkinId? selectedId;
-    for (final id in ShipSkinId.values) {
-      if (id.name == selectedValue) selectedId = id;
-    }
-    _selected = selectedId != null && _unlocked.contains(selectedId)
-        ? selectedId
-        : ShipSkinId.defaultSkin;
-    await _save(preferences);
-  });
+  Future<void> load({Set<String> ownedItemIds = const {'ship.defaultSkin'}}) =>
+      _serialize(() async {
+        final prefs = await _loadPreferences();
+        String? value;
+        try {
+          value = prefs.getString(selectedSkinKey);
+        } on TypeError {
+          // Treat malformed selection data as an unequipped item.
+        }
+        final owned = {'ship.defaultSkin', ...ownedItemIds};
+        final id = ShipSkinId.values
+            .where((item) => item.name == value)
+            .firstOrNull;
+        _selected = id != null && owned.contains('ship.${id.name}')
+            ? id
+            : ShipSkinId.defaultSkin;
+        if (_selected.name != value) {
+          final saved = await prefs.setString(selectedSkinKey, _selected.name);
+          if (!saved) throw StateError('Skin selection was not persisted.');
+        }
+      });
 
-  Future<void> updateProgress({
-    required int lifetimeGems,
-    required Set<int> completedStages,
-  }) => _serialize(() async {
-    final preferences = await _loadPreferences();
-    _unlockEligible(lifetimeGems, completedStages);
-    await _save(preferences);
-  });
-
-  Future<bool> select(ShipSkinId id) => _serialize(() async {
-    if (!_unlocked.contains(id)) return false;
-    final preferences = await _loadPreferences();
-    _selected = id;
-    await preferences.setString(selectedSkinKey, id.name);
-    return true;
-  });
-
-  Future<void> _save(SharedPreferences preferences) async {
-    await preferences.setStringList(
-      unlockedSkinsKey,
-      _unlocked.map((id) => id.name).toList()..sort(),
-    );
-    if (!_unlocked.contains(_selected)) _selected = ShipSkinId.defaultSkin;
-    await preferences.setString(selectedSkinKey, _selected.name);
-  }
-
-  void _unlockEligible(int lifetimeGems, Set<int> completedStages) {
-    for (final skin in shipSkins) {
-      final gemUnlocked =
-          skin.gemRequirement != null && lifetimeGems >= skin.gemRequirement!;
-      final stageUnlocked =
-          skin.stageRequirement != null &&
-          completedStages.contains(skin.stageRequirement);
-      if (gemUnlocked || stageUnlocked) _unlocked.add(skin.id);
-    }
-  }
-
-  Set<ShipSkinId> _readUnlocked(SharedPreferences preferences) {
-    try {
-      final ids = preferences.getStringList(unlockedSkinsKey) ?? const [];
-      return ShipSkinId.values.where((id) => ids.contains(id.name)).toSet();
-    } on TypeError {
-      return {};
-    }
-  }
-
-  String? _readSelected(SharedPreferences preferences) {
-    try {
-      return preferences.getString(selectedSkinKey);
-    } on TypeError {
-      return null;
-    }
-  }
+  Future<bool> select(ShipSkinId id, {required Set<String> ownedItemIds}) =>
+      _serialize(() async {
+        if (!ownedItemIds.contains('ship.${id.name}')) return false;
+        final prefs = await _loadPreferences();
+        final saved = await prefs.setString(selectedSkinKey, id.name);
+        if (!saved) throw StateError('Skin selection was not persisted.');
+        _selected = id;
+        return true;
+      });
 
   Future<T> _serialize<T>(Future<T> Function() action) async {
     final previous = _tail;
@@ -162,4 +125,8 @@ class SkinStore {
       done.complete();
     }
   }
+}
+
+extension _FirstOrNull<T> on Iterable<T> {
+  T? get firstOrNull => isEmpty ? null : first;
 }

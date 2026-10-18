@@ -76,6 +76,7 @@ class DailyChallengeStore {
   DailyChallengeStore({
     Future<SharedPreferences> Function()? loadPreferences,
     DateTime Function()? now,
+    this._writeString,
   }) : _loadPreferences = loadPreferences ?? SharedPreferences.getInstance,
        _now = now ?? DateTime.now;
 
@@ -83,6 +84,7 @@ class DailyChallengeStore {
 
   final Future<SharedPreferences> Function() _loadPreferences;
   final DateTime Function() _now;
+  final Future<bool> Function(SharedPreferences, String, String)? _writeString;
   List<DailyChallenge> _challenges = const [];
   String? _dateKey;
   int _bonusGemsGranted = 0;
@@ -121,18 +123,22 @@ class DailyChallengeStore {
         final preferences = await _loadPreferences();
         await _ensureToday(preferences);
         var changed = false;
-        final updated = _challenges.map((challenge) {
-          if (challenge.definition.event != event || challenge.isComplete) {
-            return challenge;
-          }
-          changed = true;
-          return DailyChallenge(
-            definition: challenge.definition,
-            progress: (challenge.progress + amount)
-                .clamp(0, challenge.definition.goal),
-            rewardClaimed: challenge.rewardClaimed,
-          );
-        }).toList(growable: false);
+        final updated = _challenges
+            .map((challenge) {
+              if (challenge.definition.event != event || challenge.isComplete) {
+                return challenge;
+              }
+              changed = true;
+              return DailyChallenge(
+                definition: challenge.definition,
+                progress: (challenge.progress + amount).clamp(
+                  0,
+                  challenge.definition.goal,
+                ),
+                rewardClaimed: challenge.rewardClaimed,
+              );
+            })
+            .toList(growable: false);
         if (changed) {
           await _save(
             preferences,
@@ -145,7 +151,10 @@ class DailyChallengeStore {
       });
 
   /// Returns the gem grant for a successful first claim, or null otherwise.
-  Future<int?> claimReward(String challengeId) => _serialize(() async {
+  Future<int?> claimReward(
+    String challengeId, {
+    Future<bool> Function(int reward)? onGrant,
+  }) => _serialize(() async {
     final preferences = await _loadPreferences();
     await _ensureToday(preferences);
     final index = _challenges.indexWhere(
@@ -156,6 +165,9 @@ class DailyChallengeStore {
     if (!challenge.isComplete || challenge.rewardClaimed) return null;
 
     final reward = challenge.definition.gemReward;
+    // Grant first using an idempotent wallet transaction. If persisting the
+    // claim then fails, a retry sees the same wallet transaction and is safe.
+    if (onGrant != null && !await onGrant(reward)) return null;
     final updated = [..._challenges];
     updated[index] = DailyChallenge(
       definition: challenge.definition,
@@ -200,9 +212,8 @@ class DailyChallengeStore {
   List<DailyChallenge> _freshChallenges(String date) {
     final offset = _dayOrdinal(date) % dailyChallengePool.length;
     return List.generate(3, (index) {
-      final definition = dailyChallengePool[
-        (offset + index) % dailyChallengePool.length
-      ];
+      final definition =
+          dailyChallengePool[(offset + index) % dailyChallengePool.length];
       return DailyChallenge(
         definition: definition,
         progress: 0,
@@ -217,20 +228,20 @@ class DailyChallengeStore {
     required List<DailyChallenge> challenges,
     required int bonusGemsGranted,
   }) async {
-    final saved = await preferences.setString(
-      stateKey,
-      jsonEncode({
-        'date': dateKey,
-        'bonusGems': bonusGemsGranted,
-        'challenges': {
-          for (final challenge in challenges)
-            challenge.definition.id: {
-              'progress': challenge.progress,
-              'claimed': challenge.rewardClaimed,
-            },
-        },
-      }),
-    );
+    final value = jsonEncode({
+      'date': dateKey,
+      'bonusGems': bonusGemsGranted,
+      'challenges': {
+        for (final challenge in challenges)
+          challenge.definition.id: {
+            'progress': challenge.progress,
+            'claimed': challenge.rewardClaimed,
+          },
+      },
+    });
+    final saved =
+        await (_writeString?.call(preferences, stateKey, value) ??
+            preferences.setString(stateKey, value));
     if (!saved) throw StateError('Daily challenge save was not confirmed.');
   }
 
@@ -262,11 +273,13 @@ class DailyChallengeStore {
         if (progress < 0 || progress > challenge.definition.goal) return null;
         final claimed = saved['claimed'] as bool;
         if (claimed && progress < challenge.definition.goal) return null;
-        result.add(DailyChallenge(
-          definition: challenge.definition,
-          progress: progress,
-          rewardClaimed: claimed,
-        ));
+        result.add(
+          DailyChallenge(
+            definition: challenge.definition,
+            progress: progress,
+            rewardClaimed: claimed,
+          ),
+        );
       }
       return _SavedDailyState(date, result, bonusGems);
     } on FormatException {
@@ -291,9 +304,11 @@ class DailyChallengeStore {
 
   int _dayOrdinal(String date) {
     final parts = date.split('-').map(int.parse).toList(growable: false);
-    return DateTime.utc(parts[0], parts[1], parts[2])
-        .difference(DateTime.utc(1970, 1, 1))
-        .inDays;
+    return DateTime.utc(
+      parts[0],
+      parts[1],
+      parts[2],
+    ).difference(DateTime.utc(1970, 1, 1)).inDays;
   }
 
   Future<T> _serialize<T>(Future<T> Function() action) async {

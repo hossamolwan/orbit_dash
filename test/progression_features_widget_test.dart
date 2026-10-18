@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:orbit_dash/achievements.dart';
 import 'package:orbit_dash/audio/game_audio_manager.dart';
 import 'package:orbit_dash/main.dart';
+import 'package:orbit_dash/gem_wallet.dart';
 import 'package:orbit_dash/skins.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -14,6 +15,8 @@ void main() {
   ) async {
     SharedPreferences.setMockInitialValues({
       AchievementStore.totalGemsKey: 25,
+      GemWallet.stateKey:
+          '{"version":1,"balance":25,"grants":[],"purchases":{}}',
       'orbit_dash_best': 7,
     });
     final driver = OrbitGameTestDriver();
@@ -28,7 +31,7 @@ void main() {
     await tester.pumpAndSettle();
     await driver.flushProgress();
 
-    expect(driver.skinUnlocked(ShipSkinId.emerald), isTrue);
+    expect(driver.skinUnlocked(ShipSkinId.emerald), isFalse);
     expect(driver.skinUnlocked(ShipSkinId.nebula), isFalse);
     await tester.tap(find.byTooltip('Ship skins'));
     await tester.pumpAndSettle();
@@ -37,6 +40,7 @@ void main() {
       findsOneWidget,
     );
     expect(find.byKey(const ValueKey('skin-option-supernova')), findsOneWidget);
+    expect(find.textContaining('NEED 50 MORE'), findsOneWidget);
     expect(
       tester
           .widget<OutlinedButton>(
@@ -46,6 +50,11 @@ void main() {
       isNull,
     );
 
+    await tester.tap(find.byKey(const ValueKey('skin-option-emerald')));
+    await tester.pumpAndSettle();
+    expect(driver.skinUnlocked(ShipSkinId.emerald), isTrue);
+    expect(driver.walletBalance, 0);
+    expect(find.text('GEMS  0'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('skin-option-emerald')));
     await tester.pumpAndSettle();
     await driver.flushProgress();
@@ -77,9 +86,40 @@ void main() {
     await driver.flushAchievements();
     await driver.flushProgress();
     expect(driver.score, 1);
+    expect(driver.walletBalance, 1);
+    expect(driver.totalGems, 26);
     expect(driver.selectedSkin, ShipSkinId.emerald);
     await tester.pumpWidget(const SizedBox.shrink());
   });
+
+  testWidgets(
+    'failed queued write does not block a later write and flush reports it',
+    (tester) async {
+      final driver = OrbitGameTestDriver();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: OrbitGamePage(
+            audioController: _FeatureTestAudio(),
+            testDriver: driver,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await driver.flushProgress();
+
+      var laterWriteRan = false;
+      driver.queueFeatureWrite(
+        () async => throw StateError('expected test failure'),
+      );
+      driver.queueFeatureWrite(() async {
+        laterWriteRan = true;
+      });
+      await expectLater(driver.flushProgress(), throwsStateError);
+      expect(laterWriteRan, isTrue);
+      await driver.flushProgress();
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
 
   testWidgets('statistics count a run, absorbed collision, and one loss once', (
     tester,
@@ -151,7 +191,7 @@ void main() {
   });
 
   testWidgets(
-    'stage completion history stays distinct and unlocks stage skins',
+    'stage completion history stays distinct without granting shop skins',
     (tester) async {
       const stages = [
         StageDefinition(number: 1, name: 'One', targetScore: 1, orbitCount: 2),
@@ -190,13 +230,13 @@ void main() {
         await driver.flushProgress();
         expect(driver.runsStarted, stage);
         expect(driver.distinctStagesCompleted, stage);
-        if (stage == 3) expect(driver.skinUnlocked(ShipSkinId.solar), isTrue);
+        if (stage == 3) expect(driver.skinUnlocked(ShipSkinId.solar), isFalse);
         if (stage < 5) {
           expect(find.text('STAGE COMPLETE'), findsOneWidget);
         }
       }
       expect(find.text('GAME COMPLETE'), findsOneWidget);
-      expect(driver.skinUnlocked(ShipSkinId.supernova), isTrue);
+      expect(driver.skinUnlocked(ShipSkinId.supernova), isFalse);
       await driver.flushProgress();
       expect(driver.distinctStagesCompleted, 5);
       await tester.pumpWidget(const SizedBox.shrink());

@@ -25,13 +25,24 @@ void main() {
     await tester.tap(find.byTooltip('Daily challenges'));
     await tester.pumpAndSettle();
     expect(find.text('DAILY CHALLENGES'), findsOneWidget);
-    expect(find.byKey(const ValueKey('daily-challenge-collect_gems')), findsOneWidget);
-    expect(find.byKey(const ValueKey('daily-challenge-start_runs')), findsOneWidget);
-    expect(find.byKey(const ValueKey('daily-challenge-absorb_hazards')), findsOneWidget);
     expect(
-      tester.widget<OutlinedButton>(
-        find.byKey(const ValueKey('daily-claim-start_runs')),
-      ).onPressed,
+      find.byKey(const ValueKey('daily-challenge-collect_gems')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('daily-challenge-start_runs')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('daily-challenge-absorb_hazards')),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<OutlinedButton>(
+            find.byKey(const ValueKey('daily-claim-start_runs')),
+          )
+          .onPressed,
       isNull,
     );
 
@@ -59,9 +70,7 @@ void main() {
     await driver.flushProgress();
     expect(
       tester
-          .widget<Text>(
-            find.byKey(const ValueKey('daily-progress-start_runs')),
-          )
+          .widget<Text>(find.byKey(const ValueKey('daily-progress-start_runs')))
           .data,
       startsWith('1 / 2'),
     );
@@ -79,16 +88,16 @@ void main() {
     );
     expect(
       tester
-          .widget<Text>(
-            find.byKey(const ValueKey('daily-status-start_runs')),
-          )
+          .widget<Text>(find.byKey(const ValueKey('daily-status-start_runs')))
           .data,
       'IN PROGRESS',
     );
     expect(
-      tester.widget<OutlinedButton>(
-        find.byKey(const ValueKey('daily-claim-start_runs')),
-      ).onPressed,
+      tester
+          .widget<OutlinedButton>(
+            find.byKey(const ValueKey('daily-claim-start_runs')),
+          )
+          .onPressed,
       isNull,
     );
 
@@ -107,9 +116,7 @@ void main() {
     await driver.flushProgress();
     expect(
       tester
-          .widget<Text>(
-            find.byKey(const ValueKey('daily-progress-start_runs')),
-          )
+          .widget<Text>(find.byKey(const ValueKey('daily-progress-start_runs')))
           .data,
       startsWith('2 / 2'),
     );
@@ -123,9 +130,11 @@ void main() {
     );
     expect(find.text('COMPLETE'), findsOneWidget);
     expect(
-      tester.widget<OutlinedButton>(
-        find.byKey(const ValueKey('daily-claim-start_runs')),
-      ).onPressed,
+      tester
+          .widget<OutlinedButton>(
+            find.byKey(const ValueKey('daily-claim-start_runs')),
+          )
+          .onPressed,
       isNotNull,
     );
 
@@ -133,13 +142,12 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       tester
-          .widget<Text>(
-            find.byKey(const ValueKey('daily-status-start_runs')),
-          )
+          .widget<Text>(find.byKey(const ValueKey('daily-status-start_runs')))
           .data,
       'CLAIMED',
     );
     expect(find.text('Bonus gems granted: 5'), findsOneWidget);
+    expect(find.text('GEMS  5'), findsOneWidget);
     expect(driver.totalGems, 0);
     await tester.pumpWidget(const SizedBox.shrink());
   });

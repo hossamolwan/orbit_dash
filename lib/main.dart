@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:orbit_dash/achievements.dart';
 import 'package:orbit_dash/audio/game_audio_manager.dart';
 import 'package:orbit_dash/daily_challenges.dart';
+import 'package:orbit_dash/gem_wallet.dart';
 import 'package:orbit_dash/player_statistics.dart';
 import 'package:orbit_dash/skins.dart';
 import 'package:flutter/material.dart';
@@ -59,6 +60,7 @@ class OrbitGameTestDriver {
   late int Function() _readScore;
   late RunState Function() _readRunState;
   late int Function() _readTotalGems;
+  late int Function() _readWalletBalance;
   late bool Function(AchievementId id) _readAchievementUnlocked;
   late Future<void> Function() _flushAchievements;
   late int Function() _readRunsStarted;
@@ -68,6 +70,7 @@ class OrbitGameTestDriver {
   late ShipSkinId Function() _readSelectedSkin;
   late bool Function(ShipSkinId id) _readSkinUnlocked;
   late Future<void> Function() _flushProgress;
+  late void Function(Future<void> Function()) _enqueueFeatureWrite;
 
   bool get shieldActive => _readShieldActive();
   Duration get shieldRemaining => _readShieldRemaining();
@@ -75,6 +78,7 @@ class OrbitGameTestDriver {
   int get score => _readScore();
   RunState get runState => _readRunState();
   int get totalGems => _readTotalGems();
+  int get walletBalance => _readWalletBalance();
   bool achievementUnlocked(AchievementId id) => _readAchievementUnlocked(id);
   Future<void> flushAchievements() => _flushAchievements();
   int get runsStarted => _readRunsStarted();
@@ -84,6 +88,8 @@ class OrbitGameTestDriver {
   ShipSkinId get selectedSkin => _readSelectedSkin();
   bool skinUnlocked(ShipSkinId id) => _readSkinUnlocked(id);
   Future<void> flushProgress() => _flushProgress();
+  void queueFeatureWrite(Future<void> Function() write) =>
+      _enqueueFeatureWrite(write);
 
   void placeShieldAtPlayer() => _placeShieldAtPlayer();
   void placeHazardAtPlayer() => _placeHazardAtPlayer();
@@ -101,6 +107,7 @@ class OrbitGameTestDriver {
     required int Function() readScore,
     required RunState Function() readRunState,
     required int Function() readTotalGems,
+    required int Function() readWalletBalance,
     required bool Function(AchievementId id) readAchievementUnlocked,
     required Future<void> Function() flushAchievements,
     required int Function() readRunsStarted,
@@ -110,6 +117,7 @@ class OrbitGameTestDriver {
     required ShipSkinId Function() readSelectedSkin,
     required bool Function(ShipSkinId id) readSkinUnlocked,
     required Future<void> Function() flushProgress,
+    required void Function(Future<void> Function()) enqueueFeatureWrite,
   }) {
     _placeShieldAtPlayer = placeShieldAtPlayer;
     _placeHazardAtPlayer = placeHazardAtPlayer;
@@ -121,6 +129,7 @@ class OrbitGameTestDriver {
     _readScore = readScore;
     _readRunState = readRunState;
     _readTotalGems = readTotalGems;
+    _readWalletBalance = readWalletBalance;
     _readAchievementUnlocked = readAchievementUnlocked;
     _flushAchievements = flushAchievements;
     _readRunsStarted = readRunsStarted;
@@ -130,6 +139,7 @@ class OrbitGameTestDriver {
     _readSelectedSkin = readSelectedSkin;
     _readSkinUnlocked = readSkinUnlocked;
     _flushProgress = flushProgress;
+    _enqueueFeatureWrite = enqueueFeatureWrite;
   }
 }
 
@@ -417,6 +427,10 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   final StageProgressStore _stageProgressStore = StageProgressStore();
   final PlayerStatisticsStore _statisticsStore = PlayerStatisticsStore();
   final SkinStore _skinStore = SkinStore();
+  final GemWallet _wallet = GemWallet();
+  int _pickupSequence = 0;
+  int _runToken = 0;
+  bool _purchaseInProgress = false;
   late final DailyChallengeStore _dailyChallengeStore;
   bool _dailyChallengesLoaded = false;
   bool _dailyChallengesLoadFailed = false;
@@ -428,6 +442,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   );
   Future<void> _achievementUpdates = Future<void>.value();
   Future<void> _pendingFeatureWrites = Future<void>.value();
+  final List<_FeatureWriteFailure> _featureWriteFailures = [];
   bool _achievementsLoaded = false;
   bool _achievementsLoadFailed = false;
   bool _achievementsLoading = false;
@@ -482,6 +497,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
       readScore: () => _score,
       readRunState: () => _state,
       readTotalGems: () => _achievementStore.totalGems,
+      readWalletBalance: () => _wallet.balance,
       readAchievementUnlocked: _achievementStore.isUnlocked,
       flushAchievements: _flushAchievements,
       readRunsStarted: () => _statisticsStore.runsStarted,
@@ -490,8 +506,10 @@ class _OrbitGamePageState extends State<OrbitGamePage>
       readShieldAbsorptions: () => _statisticsStore.shieldAbsorptions,
       readLosses: () => _statisticsStore.losses,
       readSelectedSkin: () => _skinStore.selectedSkin,
-      readSkinUnlocked: _skinStore.isUnlocked,
+      readSkinUnlocked: (id) =>
+          id == ShipSkinId.defaultSkin || _wallet.owns('ship.${id.name}'),
       flushProgress: _flushProgress,
+      enqueueFeatureWrite: _queueFeatureWrite,
     );
     _featureStoresReady = _loadFeatureStores();
     unawaited(_featureStoresReady);
@@ -505,14 +523,12 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     await _loadAchievements();
     await _loadStageProgress();
     try {
+      await _wallet.load();
       if (!_achievementsLoaded) {
         throw StateError('Lifetime gem progress is unavailable.');
       }
       await _statisticsStore.load(highestUnlockedStage: _highestUnlockedStage);
-      await _skinStore.load(
-        lifetimeGems: _achievementStore.totalGems,
-        completedStages: _statisticsStore.completedStages,
-      );
+      await _skinStore.load(ownedItemIds: _wallet.purchasedItemIds);
       if (mounted) {
         setState(() {
           _featureStoresLoaded = true;
@@ -548,11 +564,21 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     await _pendingFeatureWrites;
     await _statisticsStore.flush();
     await _skinStore.flush();
+    await _wallet.flush();
     await _dailyChallengeStore.flush();
+    if (_featureWriteFailures.isNotEmpty) {
+      final failure = _featureWriteFailures.removeAt(0);
+      Error.throwWithStackTrace(failure.error, failure.stackTrace);
+    }
   }
 
   void _queueFeatureWrite(Future<void> Function() write) {
-    _pendingFeatureWrites = _pendingFeatureWrites.then((_) => write());
+    _pendingFeatureWrites = _pendingFeatureWrites
+        .then((_) => write())
+        .catchError((Object error, StackTrace stackTrace) {
+          debugPrint('Queued feature write failed: $error');
+          _featureWriteFailures.add(_FeatureWriteFailure(error, stackTrace));
+        });
   }
 
   Future<void> _loadStageProgress() async {
@@ -737,10 +763,12 @@ class _OrbitGamePageState extends State<OrbitGamePage>
         _gemAngle = (_angle + 2.4 + (_score % 3) * 0.45) % (math.pi * 2);
         _gemLane = nextOrbitLane(_gemLane, _currentStage.orbitCount);
         _queueAchievementUpdate(_recordGemProgress());
+        final pickupId = 'pickup:$_runToken:${++_pickupSequence}';
+        _queueFeatureWrite(() async {
+          await _wallet.creditPickupOnce(pickupId, 1);
+        });
         _queueFeatureWrite(
-          () => _recordDailyChallengeEvent(
-            DailyChallengeEvent.gemCollected,
-          ),
+          () => _recordDailyChallengeEvent(DailyChallengeEvent.gemCollected),
         );
         if (_completionGate.completeIfReached(_score, _currentStage)) {
           _completeStage();
@@ -776,6 +804,9 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     }
     setState(() {
       _currentStageIndex = requestedStage;
+      _wallet.beginPickupSession();
+      _runToken = DateTime.now().microsecondsSinceEpoch;
+      _pickupSequence = 0;
       _score = 0;
       _lane = 0;
       _angle = -math.pi / 2;
@@ -865,16 +896,6 @@ class _OrbitGamePageState extends State<OrbitGamePage>
 
   Future<List<AchievementId>> _recordGemProgress() async {
     final newlyUnlocked = await _achievementStore.recordGem();
-    try {
-      await _skinStore.updateProgress(
-        lifetimeGems: _achievementStore.totalGems,
-        completedStages: _statisticsStore.completedStages,
-      );
-    } catch (error) {
-      debugPrint(
-        'Failed to update skin unlocks after collecting a gem: $error',
-      );
-    }
     return newlyUnlocked;
   }
 
@@ -908,10 +929,6 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   Future<void> _recordStageCompletion(int stage) async {
     try {
       await _statisticsStore.recordStageCompleted(stage);
-      await _skinStore.updateProgress(
-        lifetimeGems: _achievementStore.totalGems,
-        completedStages: _statisticsStore.completedStages,
-      );
       if (mounted) setState(() {});
     } catch (error) {
       debugPrint('Failed to save stage completion statistic: $error');
@@ -1013,7 +1030,18 @@ class _OrbitGamePageState extends State<OrbitGamePage>
 
   Future<void> _claimDailyChallengeReward(String id) async {
     try {
-      await _dailyChallengeStore.claimReward(id);
+      final date = _dailyChallengeStore.dateKey;
+      await _dailyChallengeStore.claimReward(
+        id,
+        onGrant: (reward) async {
+          final credited = await _wallet.creditDailyRewardOnce(
+            dateKey: date,
+            challengeId: id,
+            amount: reward,
+          );
+          return credited || _wallet.hasDailyReward(date, id);
+        },
+      );
       if (mounted) setState(() {});
     } catch (error) {
       debugPrint('Failed to claim daily challenge reward: $error');
@@ -1021,12 +1049,39 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   }
 
   Future<void> _selectSkin(ShipSkinId id) async {
-    if (!_skinStore.isUnlocked(id)) return;
+    final skin = shipSkins.firstWhere((item) => item.id == id);
+    final owned = id == ShipSkinId.defaultSkin || _wallet.owns(skin.itemId);
+    if (!owned) {
+      await _purchaseSkin(skin);
+      return;
+    }
     try {
-      final selected = await _skinStore.select(id);
+      final selected = await _skinStore.select(
+        id,
+        ownedItemIds: {'ship.defaultSkin', ..._wallet.purchasedItemIds},
+      );
       if (selected && mounted) setState(() {});
     } catch (error) {
       debugPrint('Failed to save selected ship skin: $error');
+    }
+  }
+
+  Future<void> _purchaseSkin(ShipSkin skin) async {
+    if (_purchaseInProgress || skin.price <= 0 || _wallet.owns(skin.itemId)) {
+      return;
+    }
+    _purchaseInProgress = true;
+    try {
+      final purchased = await _wallet.purchase(
+        itemId: skin.itemId,
+        price: skin.price,
+      );
+      if (purchased && mounted) setState(() {});
+    } catch (error) {
+      debugPrint('Failed to purchase ship skin: $error');
+    } finally {
+      _purchaseInProgress = false;
+      if (mounted) setState(() {});
     }
   }
 
@@ -1786,6 +1841,16 @@ class _OrbitGamePageState extends State<OrbitGamePage>
         textAlign: TextAlign.center,
         style: TextStyle(color: Color(0xffaebbd2), fontSize: 11),
       ),
+      const SizedBox(height: 7),
+      Text(
+        'GEMS  ${_wallet.balance}',
+        key: const ValueKey('wallet-balance'),
+        style: const TextStyle(
+          color: Color(0xffffd66e),
+          fontSize: 13,
+          fontWeight: FontWeight.w900,
+        ),
+      ),
       SizedBox(height: compact ? 9 : 12),
       if (!_featureStoresLoaded)
         _progressStoreMessage()
@@ -1805,13 +1870,17 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   );
 
   Widget _skinOption(ShipSkin skin) {
-    final unlocked = _skinStore.isUnlocked(skin.id);
+    final owned =
+        skin.id == ShipSkinId.defaultSkin || _wallet.owns(skin.itemId);
     final selected = _skinStore.selectedSkin == skin.id;
-    final requirement = skin.gemRequirement != null
-        ? 'Collect ${skin.gemRequirement} lifetime gems'
-        : skin.stageRequirement != null
-        ? 'Complete Stage ${skin.stageRequirement}'
-        : 'Available from the start';
+    final canAfford = _wallet.balance >= skin.price;
+    final state = selected
+        ? 'EQUIPPED'
+        : owned
+        ? 'OWNED · EQUIP'
+        : canAfford
+        ? 'BUY · ${skin.price} GEMS'
+        : 'NEED ${skin.price - _wallet.balance} MORE';
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: SizedBox(
@@ -1819,7 +1888,9 @@ class _OrbitGamePageState extends State<OrbitGamePage>
         height: 58,
         child: OutlinedButton(
           key: ValueKey('skin-option-${skin.id.name}'),
-          onPressed: unlocked ? () => unawaited(_selectSkin(skin.id)) : null,
+          onPressed: owned || canAfford
+              ? () => unawaited(_selectSkin(skin.id))
+              : null,
           style: OutlinedButton.styleFrom(
             alignment: Alignment.centerLeft,
             padding: const EdgeInsets.symmetric(horizontal: 11),
@@ -1837,8 +1908,8 @@ class _OrbitGamePageState extends State<OrbitGamePage>
           child: Row(
             children: [
               Icon(
-                unlocked ? _skinIcon(skin.id) : Icons.lock_outline,
-                color: unlocked ? _skinColor(skin.id) : Colors.white38,
+                owned ? _skinIcon(skin.id) : Icons.lock_outline,
+                color: owned ? _skinColor(skin.id) : Colors.white38,
                 size: 20,
               ),
               const SizedBox(width: 9),
@@ -1855,7 +1926,9 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                       ),
                     ),
                     Text(
-                      requirement,
+                      '${skin.rarity == CosmeticRarity.premium ? 'PREMIUM' : 'STANDARD'}  ·  ${skin.description}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: Color(0xff9baac3),
                         fontSize: 9,
@@ -1865,13 +1938,15 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                 ),
               ),
               Text(
-                selected
-                    ? 'SELECTED'
-                    : unlocked
-                    ? 'SELECT'
-                    : 'LOCKED',
+                state,
                 style: TextStyle(
-                  color: selected ? _skinColor(skin.id) : Colors.white54,
+                  color: selected
+                      ? _skinColor(skin.id)
+                      : owned
+                      ? Colors.white70
+                      : canAfford
+                      ? const Color(0xffffd66e)
+                      : Colors.white38,
                   fontSize: 8,
                   letterSpacing: .5,
                   fontWeight: FontWeight.w800,
@@ -1949,7 +2024,11 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   }) => Column(
     mainAxisSize: MainAxisSize.min,
     children: [
-      Icon(Icons.calendar_today_rounded, color: const Color(0xff65eaff), size: 32),
+      Icon(
+        Icons.calendar_today_rounded,
+        color: const Color(0xff65eaff),
+        size: 32,
+      ),
       SizedBox(height: compact ? 7 : 10),
       Text(
         'DAILY CHALLENGES',
@@ -1966,6 +2045,16 @@ class _OrbitGamePageState extends State<OrbitGamePage>
         _dailyChallengeStore.dateKey,
         key: const ValueKey('daily-challenge-date'),
         style: const TextStyle(color: Color(0xff8c9bb5), fontSize: 10),
+      ),
+      const SizedBox(height: 4),
+      Text(
+        'GEMS  ${_wallet.balance}',
+        key: const ValueKey('daily-wallet-balance'),
+        style: const TextStyle(
+          color: Color(0xffffd66e),
+          fontSize: 12,
+          fontWeight: FontWeight.w800,
+        ),
       ),
       SizedBox(height: compact ? 8 : 11),
       if (!_dailyChallengesLoaded)
@@ -2017,9 +2106,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     final definition = challenge.definition;
     final progressRatio = definition.goal <= 0
         ? 0.0
-        : (challenge.progress / definition.goal)
-              .clamp(0.0, 1.0)
-              .toDouble();
+        : (challenge.progress / definition.goal).clamp(0.0, 1.0).toDouble();
     final displayedProgress = challenge.isComplete ? 1.0 : progressRatio;
     final status = challenge.rewardClaimed
         ? 'CLAIMED'
@@ -2058,7 +2145,10 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                 Text(
                   '${challenge.progress} / ${definition.goal}  ·  ${definition.gemReward} gems',
                   key: ValueKey('daily-progress-${definition.id}'),
-                  style: const TextStyle(color: Color(0xffaebbd2), fontSize: 10),
+                  style: const TextStyle(
+                    color: Color(0xffaebbd2),
+                    fontSize: 10,
+                  ),
                 ),
                 const SizedBox(height: 5),
                 ClipRRect(
@@ -2850,6 +2940,13 @@ class _OrbitPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _OrbitPainter oldDelegate) => true;
+}
+
+class _FeatureWriteFailure {
+  const _FeatureWriteFailure(this.error, this.stackTrace);
+
+  final Object error;
+  final StackTrace stackTrace;
 }
 
 Color _skinColor(ShipSkinId skin) => switch (skin) {
