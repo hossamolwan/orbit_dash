@@ -182,11 +182,79 @@ void main() {
     );
 
     test(
+      'trail catalog has stable IDs, pricing, rarity and a free default',
+      () {
+        expect(trailSkins.map((skin) => skin.itemId), [
+          'trail.classic',
+          'trail.aurora',
+          'trail.solar',
+        ]);
+        expect(trailSkins.map((skin) => skin.price), [0, 100, 350]);
+        expect(
+          trailSkins.every((skin) => skin.category == CosmeticCategory.trail),
+          isTrue,
+        );
+        expect(trailSkins[0].rarity, CosmeticRarity.standard);
+        expect(trailSkins[0].price, 0);
+        expect(trailSkins[1].rarity, CosmeticRarity.standard);
+        expect(trailSkins[2].rarity, CosmeticRarity.premium);
+        expect(CosmeticCategory.values, contains(CosmeticCategory.trail));
+      },
+    );
+
+    test(
+      'trail purchases require funds and wallet ownership to equip',
+      () async {
+        final wallet = GemWallet();
+        await wallet.load();
+        final appearances = AppearanceStore();
+        await appearances.load(ownedItemIds: wallet.purchasedItemIds);
+        expect(
+          await appearances.selectTrail(
+            TrailSkinId.aurora,
+            ownedItemIds: wallet.purchasedItemIds,
+          ),
+          isFalse,
+        );
+        expect(
+          await wallet.purchase(itemId: 'trail.aurora', price: 100),
+          isFalse,
+        );
+        await wallet.creditPickupOnce('trail-test-reward', 100);
+        expect(
+          await wallet.purchase(itemId: 'trail.aurora', price: 100),
+          isTrue,
+        );
+        expect(
+          await wallet.purchase(itemId: 'trail.aurora', price: 100),
+          isFalse,
+        );
+        expect(wallet.balance, 0);
+        expect(
+          await appearances.selectTrail(
+            TrailSkinId.aurora,
+            ownedItemIds: wallet.purchasedItemIds,
+          ),
+          isTrue,
+        );
+        final restoredWallet = GemWallet();
+        await restoredWallet.load();
+        final restoredAppearances = AppearanceStore();
+        await restoredAppearances.load(
+          ownedItemIds: restoredWallet.purchasedItemIds,
+        );
+        expect(restoredWallet.owns('trail.aurora'), isTrue);
+        expect(restoredAppearances.selectedTrail, TrailSkinId.aurora);
+        expect(restoredWallet.balance, 0);
+      },
+    );
+
+    test(
       'orbit and core purchases and selections persist independently',
       () async {
         final wallet = GemWallet();
         await wallet.load();
-        await wallet.creditPickupOnce('gift', 710);
+        await wallet.creditPickupOnce('gift', 810);
         for (final skin in orbitSkins.skip(1)) {
           expect(
             await wallet.purchase(itemId: skin.itemId, price: skin.price),
@@ -199,6 +267,10 @@ void main() {
             isTrue,
           );
         }
+        expect(
+          await wallet.purchase(itemId: 'trail.aurora', price: 100),
+          isTrue,
+        );
         expect(wallet.balance, 0);
         expect(
           await wallet.purchase(itemId: 'orbit.aurora', price: 60),
@@ -221,14 +293,23 @@ void main() {
           ),
           isTrue,
         );
+        expect(
+          await appearances.selectTrail(
+            TrailSkinId.aurora,
+            ownedItemIds: wallet.purchasedItemIds,
+          ),
+          isTrue,
+        );
         final restoredWallet = GemWallet();
         await restoredWallet.load();
         final restored = AppearanceStore();
         await restored.load(ownedItemIds: restoredWallet.purchasedItemIds);
         expect(restored.selectedOrbit, OrbitSkinId.aurora);
         expect(restored.selectedCore, CoreSkinId.glacier);
+        expect(restored.selectedTrail, TrailSkinId.aurora);
         expect(restoredWallet.owns('orbit.aurora'), isTrue);
         expect(restoredWallet.owns('core.glacier'), isTrue);
+        expect(restoredWallet.owns('trail.aurora'), isTrue);
         expect(restoredWallet.balance, 0);
       },
     );
@@ -239,11 +320,13 @@ void main() {
         SharedPreferences.setMockInitialValues({
           AppearanceStore.selectedOrbitKey: 'solar',
           AppearanceStore.selectedCoreKey: 'unknown',
+          AppearanceStore.selectedTrailKey: 'solar',
         });
         final appearances = AppearanceStore();
         await appearances.load();
         expect(appearances.selectedOrbit, OrbitSkinId.defaultOrbit);
         expect(appearances.selectedCore, CoreSkinId.defaultCore);
+        expect(appearances.selectedTrail, TrailSkinId.classic);
 
         final preferences = await SharedPreferences.getInstance();
         await preferences.setString(AppearanceStore.selectedOrbitKey, 'aurora');
@@ -252,12 +335,17 @@ void main() {
         await unowned.load(ownedItemIds: {'ship.solar'});
         expect(unowned.selectedOrbit, OrbitSkinId.defaultOrbit);
         expect(unowned.selectedCore, CoreSkinId.defaultCore);
+        expect(unowned.selectedTrail, TrailSkinId.classic);
         expect(
           await unowned.selectOrbit(OrbitSkinId.aurora, ownedItemIds: {}),
           isFalse,
         );
         expect(
           await unowned.selectCore(CoreSkinId.crimson, ownedItemIds: {}),
+          isFalse,
+        );
+        expect(
+          await unowned.selectTrail(TrailSkinId.solar, ownedItemIds: {}),
           isFalse,
         );
         expect(

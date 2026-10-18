@@ -27,6 +27,7 @@ void main() {
     expect(find.text('SHIP'), findsOneWidget);
     expect(find.text('ORBIT'), findsOneWidget);
     expect(find.text('CORE'), findsOneWidget);
+    expect(find.text('TRAIL'), findsOneWidget);
     expect(find.text('SHIP SKINS'), findsOneWidget);
     expect(
       find.byKey(const ValueKey('skin-option-defaultSkin')),
@@ -106,6 +107,84 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('trail purchases, equips and persists independently', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      GemWallet.stateKey:
+          '{"version":2,"balance":450,"dailyRewardDate":null,"dailyRewardIds":[],"purchases":{"ship.emerald":40,"orbit.aurora":60,"core.crimson":75}}',
+      SkinStore.selectedSkinKey: 'emerald',
+      AppearanceStore.selectedOrbitKey: 'aurora',
+      AppearanceStore.selectedCoreKey: 'crimson',
+    });
+    final driver = OrbitGameTestDriver();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: OrbitGamePage(audioController: _ShopAudio(), testDriver: driver),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await driver.flushProgress();
+    await tester.tap(find.byTooltip('Cosmetic shop'));
+    await tester.pumpAndSettle();
+    final trailTab = find.byKey(const ValueKey('cosmetic-tab-trail'));
+    await tester.ensureVisible(trailTab);
+    await tester.tap(trailTab);
+    await tester.pumpAndSettle();
+    expect(find.text('TRAIL SKINS'), findsOneWidget);
+    expect(driver.selectedTrail, TrailSkinId.classic);
+    for (final skin in trailSkins) {
+      expect(
+        find.byKey(ValueKey('preview-trail-${skin.id.name}')),
+        findsOneWidget,
+      );
+    }
+
+    final aurora = find.byKey(const ValueKey('trail-option-aurora'));
+    await tester.tap(aurora);
+    await tester.pumpAndSettle();
+    expect(driver.walletBalance, 350);
+    expect(driver.selectedTrail, TrailSkinId.classic);
+    await tester.tap(aurora);
+    await tester.pumpAndSettle();
+    expect(driver.walletBalance, 350);
+    expect(driver.selectedTrail, TrailSkinId.aurora);
+    expect(driver.selectedSkin, ShipSkinId.emerald);
+    expect(driver.selectedOrbit, OrbitSkinId.aurora);
+    expect(driver.selectedCore, CoreSkinId.crimson);
+
+    final solar = find.byKey(const ValueKey('trail-option-solar'));
+    await tester.tap(solar);
+    await tester.pumpAndSettle();
+    expect(driver.walletBalance, 0);
+    expect(driver.selectedTrail, TrailSkinId.aurora);
+    await tester.tap(solar);
+    await tester.pumpAndSettle();
+    expect(driver.walletBalance, 0);
+    expect(driver.selectedTrail, TrailSkinId.solar);
+    expect(driver.selectedSkin, ShipSkinId.emerald);
+    expect(driver.selectedOrbit, OrbitSkinId.aurora);
+    expect(driver.selectedCore, CoreSkinId.crimson);
+
+    await driver.flushProgress();
+    final preferences = await SharedPreferences.getInstance();
+    expect(preferences.getString(AppearanceStore.selectedTrailKey), 'solar');
+    expect(preferences.getString(SkinStore.selectedSkinKey), 'emerald');
+    expect(preferences.getString(AppearanceStore.selectedOrbitKey), 'aurora');
+    expect(preferences.getString(AppearanceStore.selectedCoreKey), 'crimson');
+    final restoredWallet = GemWallet();
+    await restoredWallet.load();
+    final restoredAppearances = AppearanceStore();
+    await restoredAppearances.load(
+      ownedItemIds: restoredWallet.purchasedItemIds,
+    );
+    expect(restoredWallet.owns('trail.aurora'), isTrue);
+    expect(restoredWallet.owns('trail.solar'), isTrue);
+    expect(restoredAppearances.selectedTrail, TrailSkinId.solar);
+    expect(restoredWallet.balance, 0);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('previews isolate candidate IDs without changing shop state', (
     tester,
   ) async {
@@ -139,7 +218,10 @@ void main() {
     await tester.ensureVisible(find.byKey(const ValueKey('preview-ship-supernova')));
     await tester.tap(find.byKey(const ValueKey('preview-ship-supernova')));
     await tester.pumpAndSettle();
-    _expectPreviewScene(tester, 'ship=supernova; orbit=aurora; core=crimson');
+    _expectPreviewScene(
+      tester,
+      'ship=supernova; orbit=aurora; core=crimson; trail=classic',
+    );
     expect(find.text('Supernova'), findsWidgets);
     final metadata = tester.widget<Text>(
       find.byKey(const ValueKey('cosmetic-preview-category-rarity')),
@@ -165,7 +247,10 @@ void main() {
     await tester.ensureVisible(find.byKey(const ValueKey('preview-orbit-solar')));
     await tester.tap(find.byKey(const ValueKey('preview-orbit-solar')));
     await tester.pumpAndSettle();
-    _expectPreviewScene(tester, 'ship=emerald; orbit=solar; core=crimson');
+    _expectPreviewScene(
+      tester,
+      'ship=emerald; orbit=solar; core=crimson; trail=classic',
+    );
     expect(driver.walletBalance, 0);
     expect(driver.selectedOrbit, OrbitSkinId.aurora);
     await _expectWalletOwnership(ownedBefore);
@@ -179,7 +264,10 @@ void main() {
     await tester.ensureVisible(find.byKey(const ValueKey('preview-core-glacier')));
     await tester.tap(find.byKey(const ValueKey('preview-core-glacier')));
     await tester.pumpAndSettle();
-    _expectPreviewScene(tester, 'ship=emerald; orbit=aurora; core=glacier');
+    _expectPreviewScene(
+      tester,
+      'ship=emerald; orbit=aurora; core=glacier; trail=classic',
+    );
     expect(driver.walletBalance, 0);
     expect(driver.selectedCore, CoreSkinId.crimson);
     await _expectWalletOwnership(ownedBefore);
@@ -187,11 +275,32 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('CORE SKINS'), findsOneWidget);
     expect(find.byKey(const ValueKey('core-option-glacier')), findsOneWidget);
+    await tester.ensureVisible(find.byKey(const ValueKey('cosmetic-tab-trail')));
+    await tester.tap(find.byKey(const ValueKey('cosmetic-tab-trail')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const ValueKey('preview-trail-solar')));
+    await tester.tap(find.byKey(const ValueKey('preview-trail-solar')));
+    await tester.pumpAndSettle();
+    _expectPreviewScene(
+      tester,
+      'ship=emerald; orbit=aurora; core=crimson; trail=solar',
+    );
+    expect(driver.walletBalance, 0);
+    expect(driver.selectedTrail, TrailSkinId.classic);
+    await _expectWalletOwnership(ownedBefore);
+    await tester.tap(find.byKey(const ValueKey('cosmetic-preview-close')));
+    await tester.pumpAndSettle();
+    expect(find.text('TRAIL SKINS'), findsOneWidget);
+    expect(find.byKey(const ValueKey('trail-option-solar')), findsOneWidget);
     await driver.flushProgress();
     expect(preferences.getString(GemWallet.stateKey), walletStateBefore);
     expect(preferences.getString(SkinStore.selectedSkinKey), shipSelectionBefore);
     expect(preferences.getString(AppearanceStore.selectedOrbitKey), orbitSelectionBefore);
     expect(preferences.getString(AppearanceStore.selectedCoreKey), coreSelectionBefore);
+    expect(
+      preferences.getString(AppearanceStore.selectedTrailKey),
+      TrailSkinId.classic.name,
+    );
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
@@ -241,15 +350,20 @@ void main() {
     expect(find.byKey(const ValueKey('core-option-glacier')), findsOneWidget);
     expect(find.byKey(const ValueKey('orbit-option-aurora')), findsNothing);
     expect(tester.takeException(), isNull);
-    final glacierPreview = find.byKey(const ValueKey('preview-core-glacier'));
-    await tester.ensureVisible(glacierPreview);
-    await tester.tap(glacierPreview);
+    final trailTab = find.byKey(const ValueKey('cosmetic-tab-trail'));
+    await tester.ensureVisible(trailTab);
+    await tester.tap(trailTab);
+    await tester.pumpAndSettle();
+    expect(find.text('TRAIL SKINS'), findsOneWidget);
+    final solarPreview = find.byKey(const ValueKey('preview-trail-solar'));
+    await tester.ensureVisible(solarPreview);
+    await tester.tap(solarPreview);
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('cosmetic-preview-scene')), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.tap(find.byKey(const ValueKey('cosmetic-preview-close')));
     await tester.pumpAndSettle();
-    expect(find.text('CORE SKINS'), findsOneWidget);
+    expect(find.text('TRAIL SKINS'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });

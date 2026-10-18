@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
-enum CosmeticCategory { ship, orbit, core }
+enum CosmeticCategory { ship, orbit, core, trail }
 
 enum CosmeticRarity { standard, premium }
 
@@ -11,6 +11,80 @@ enum ShipSkinId { defaultSkin, emerald, nebula, solar, supernova }
 enum OrbitSkinId { defaultOrbit, aurora, solar }
 
 enum CoreSkinId { defaultCore, crimson, glacier }
+
+enum TrailSkinId { classic, aurora, solar }
+
+class TrailSkin {
+  const TrailSkin({
+    required this.id,
+    required this.name,
+    required this.description,
+    required this.rarity,
+    required this.price,
+  });
+
+  final TrailSkinId id;
+  String get itemId => 'trail.${id.name}';
+  final String name;
+  final String description;
+  final CosmeticRarity rarity;
+  final int price;
+  CosmeticCategory get category => CosmeticCategory.trail;
+}
+
+const trailSkins = <TrailSkin>[
+  TrailSkin(
+    id: TrailSkinId.classic,
+    name: 'Classic Trail',
+    description: 'The original cyan trail.',
+    rarity: CosmeticRarity.standard,
+    price: 0,
+  ),
+  TrailSkin(
+    id: TrailSkinId.aurora,
+    name: 'Aurora Trail',
+    description: 'Soft emerald particles.',
+    rarity: CosmeticRarity.standard,
+    price: 100,
+  ),
+  TrailSkin(
+    id: TrailSkinId.solar,
+    name: 'Solar Trail',
+    description: 'A warm golden flare.',
+    rarity: CosmeticRarity.premium,
+    price: 350,
+  ),
+];
+
+class TrailVisualStyle {
+  const TrailVisualStyle({
+    required this.color,
+    required this.glowAlpha,
+    required this.particleAlpha,
+  });
+
+  final int color;
+  final double glowAlpha;
+  final double particleAlpha;
+}
+
+const trailVisualStyles = <TrailSkinId, TrailVisualStyle>{
+  TrailSkinId.classic: TrailVisualStyle(
+    color: 0xff60efff,
+    glowAlpha: .16,
+    particleAlpha: .10,
+  ),
+  TrailSkinId.aurora: TrailVisualStyle(
+    color: 0xff39ed9d,
+    glowAlpha: .22,
+    particleAlpha: .14,
+  ),
+  TrailSkinId.solar: TrailVisualStyle(
+    color: 0xffffa83b,
+    glowAlpha: .28,
+    particleAlpha: .18,
+  ),
+};
 
 class ShipSkin {
   const ShipSkin({
@@ -173,13 +247,16 @@ class AppearanceStore {
 
   static const selectedOrbitKey = 'orbit_dash_selected_orbit_v1';
   static const selectedCoreKey = 'orbit_dash_selected_core_v1';
+  static const selectedTrailKey = 'orbit_dash_selected_trail_v1';
   final Future<SharedPreferences> Function() _loadPreferences;
   OrbitSkinId _selectedOrbit = OrbitSkinId.defaultOrbit;
   CoreSkinId _selectedCore = CoreSkinId.defaultCore;
+  TrailSkinId _selectedTrail = TrailSkinId.classic;
   Future<void> _tail = Future<void>.value();
 
   OrbitSkinId get selectedOrbit => _selectedOrbit;
   CoreSkinId get selectedCore => _selectedCore;
+  TrailSkinId get selectedTrail => _selectedTrail;
   Future<void> flush() => _tail;
 
   Future<void> load({Set<String> ownedItemIds = const {}}) =>
@@ -187,11 +264,15 @@ class AppearanceStore {
         final prefs = await _loadPreferences();
         final orbitValue = _readString(prefs, selectedOrbitKey);
         final coreValue = _readString(prefs, selectedCoreKey);
+        final trailValue = _readString(prefs, selectedTrailKey);
         final orbit = OrbitSkinId.values
             .where((id) => id.name == orbitValue)
             .firstOrNull;
         final core = CoreSkinId.values
             .where((id) => id.name == coreValue)
+            .firstOrNull;
+        final trail = TrailSkinId.values
+            .where((id) => id.name == trailValue)
             .firstOrNull;
         _selectedOrbit =
             orbit != null &&
@@ -205,11 +286,20 @@ class AppearanceStore {
                     ownedItemIds.contains('core.${core.name}'))
             ? core
             : CoreSkinId.defaultCore;
+        _selectedTrail =
+            trail != null &&
+                (trail == TrailSkinId.classic ||
+                    ownedItemIds.contains('trail.${trail.name}'))
+            ? trail
+            : TrailSkinId.classic;
         if (_selectedOrbit.name != orbitValue) {
           await _save(prefs, selectedOrbitKey, _selectedOrbit.name);
         }
         if (_selectedCore.name != coreValue) {
           await _save(prefs, selectedCoreKey, _selectedCore.name);
+        }
+        if (_selectedTrail.name != trailValue) {
+          await _save(prefs, selectedTrailKey, _selectedTrail.name);
         }
       });
 
@@ -238,6 +328,20 @@ class AppearanceStore {
         _selectedCore = id;
         return true;
       });
+
+  Future<bool> selectTrail(
+    TrailSkinId id, {
+    required Set<String> ownedItemIds,
+  }) => _serialize(() async {
+    if (id != TrailSkinId.classic &&
+        !ownedItemIds.contains('trail.${id.name}')) {
+      return false;
+    }
+    final prefs = await _loadPreferences();
+    await _save(prefs, selectedTrailKey, id.name);
+    _selectedTrail = id;
+    return true;
+  });
 
   String? _readString(SharedPreferences prefs, String key) {
     try {

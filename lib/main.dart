@@ -44,7 +44,7 @@ enum RunState {
   dailyChallenges,
 }
 
-enum CosmeticShopCategory { ship, orbit, core }
+enum CosmeticShopCategory { ship, orbit, core, trail }
 
 /// Deterministic controls and observations for game-cycle widget tests.
 class OrbitGameTestDriver {
@@ -72,6 +72,7 @@ class OrbitGameTestDriver {
   late ShipSkinId Function() _readSelectedSkin;
   late OrbitSkinId Function() _readSelectedOrbit;
   late CoreSkinId Function() _readSelectedCore;
+  late TrailSkinId Function() _readSelectedTrail;
   late bool Function(ShipSkinId id) _readSkinUnlocked;
   late Future<void> Function() _flushProgress;
   late void Function(Future<void> Function()) _enqueueFeatureWrite;
@@ -92,6 +93,7 @@ class OrbitGameTestDriver {
   ShipSkinId get selectedSkin => _readSelectedSkin();
   OrbitSkinId get selectedOrbit => _readSelectedOrbit();
   CoreSkinId get selectedCore => _readSelectedCore();
+  TrailSkinId get selectedTrail => _readSelectedTrail();
   bool skinUnlocked(ShipSkinId id) => _readSkinUnlocked(id);
   Future<void> flushProgress() => _flushProgress();
   void queueFeatureWrite(Future<void> Function() write) =>
@@ -123,6 +125,7 @@ class OrbitGameTestDriver {
     required ShipSkinId Function() readSelectedSkin,
     required OrbitSkinId Function() readSelectedOrbit,
     required CoreSkinId Function() readSelectedCore,
+    required TrailSkinId Function() readSelectedTrail,
     required bool Function(ShipSkinId id) readSkinUnlocked,
     required Future<void> Function() flushProgress,
     required void Function(Future<void> Function()) enqueueFeatureWrite,
@@ -147,6 +150,7 @@ class OrbitGameTestDriver {
     _readSelectedSkin = readSelectedSkin;
     _readSelectedOrbit = readSelectedOrbit;
     _readSelectedCore = readSelectedCore;
+    _readSelectedTrail = readSelectedTrail;
     _readSkinUnlocked = readSkinUnlocked;
     _flushProgress = flushProgress;
     _enqueueFeatureWrite = enqueueFeatureWrite;
@@ -520,6 +524,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
       readSelectedSkin: () => _skinStore.selectedSkin,
       readSelectedOrbit: () => _appearanceStore.selectedOrbit,
       readSelectedCore: () => _appearanceStore.selectedCore,
+      readSelectedTrail: () => _appearanceStore.selectedTrail,
       readSkinUnlocked: (id) =>
           id == ShipSkinId.defaultSkin || _wallet.owns('ship.${id.name}'),
       flushProgress: _flushProgress,
@@ -1163,6 +1168,33 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     }
   }
 
+  Future<void> _selectTrailSkin(TrailSkinId id) async {
+    final skin = trailSkins.firstWhere((item) => item.id == id);
+    if (id != TrailSkinId.classic && !_wallet.owns(skin.itemId)) {
+      if (_purchaseInProgress) return;
+      _purchaseInProgress = true;
+      try {
+        await _wallet.purchase(itemId: skin.itemId, price: skin.price);
+        if (mounted) setState(() {});
+      } catch (error) {
+        debugPrint('Failed to purchase trail skin: $error');
+      } finally {
+        _purchaseInProgress = false;
+        if (mounted) setState(() {});
+      }
+      return;
+    }
+    try {
+      final selected = await _appearanceStore.selectTrail(
+        id,
+        ownedItemIds: _wallet.purchasedItemIds,
+      );
+      if (selected && mounted) setState(() {});
+    } catch (error) {
+      debugPrint('Failed to save selected trail skin: $error');
+    }
+  }
+
   void _tapGame(Offset globalPosition) {
     if (_state == RunState.playing) {
       final canvas =
@@ -1396,6 +1428,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                                 shieldLane: _shieldPickup?.lane,
                                 shieldActive: _shield.isActive,
                                 playerSkin: _skinStore.selectedSkin,
+                                trailSkin: _appearanceStore.selectedTrail,
                                 orbitSkin: _appearanceStore.selectedOrbit,
                                 coreSkin: _appearanceStore.selectedCore,
                               ),
@@ -1979,6 +2012,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                 category: CosmeticShopCategory.ship,
                 rarity: skin.rarity,
                 playerSkin: skin.id,
+                trailSkin: _appearanceStore.selectedTrail,
                 orbitSkin: _appearanceStore.selectedOrbit,
                 coreSkin: _appearanceStore.selectedCore,
               ),
@@ -2006,11 +2040,12 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                 category: CosmeticShopCategory.orbit,
                 rarity: skin.rarity,
                 playerSkin: _skinStore.selectedSkin,
+                trailSkin: _appearanceStore.selectedTrail,
                 orbitSkin: skin.id,
                 coreSkin: _appearanceStore.selectedCore,
               ),
             )
-        else
+        else if (_selectedShopCategory == CosmeticShopCategory.core)
           for (final skin in coreSkins)
             _cosmeticItemWithPreview(
               key: 'core-${skin.id.name}',
@@ -2033,8 +2068,36 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                 category: CosmeticShopCategory.core,
                 rarity: skin.rarity,
                 playerSkin: _skinStore.selectedSkin,
+                trailSkin: _appearanceStore.selectedTrail,
                 orbitSkin: _appearanceStore.selectedOrbit,
                 coreSkin: skin.id,
+              ),
+            )
+        else if (_selectedShopCategory == CosmeticShopCategory.trail)
+          for (final skin in trailSkins)
+            _cosmeticItemWithPreview(
+              key: 'trail-${skin.id.name}',
+              name: skin.name,
+              option: _appearanceOption(
+                key: 'trail-option-${skin.id.name}',
+                name: skin.name,
+                description: skin.description,
+                rarity: skin.rarity,
+                price: skin.price,
+                owned:
+                    skin.id == TrailSkinId.classic || _wallet.owns(skin.itemId),
+                selected: _appearanceStore.selectedTrail == skin.id,
+                accent: _trailColor(skin.id),
+                onSelect: () => _selectTrailSkin(skin.id),
+              ),
+              onPreview: () => _showCosmeticPreview(
+                name: skin.name,
+                category: CosmeticShopCategory.trail,
+                rarity: skin.rarity,
+                playerSkin: _skinStore.selectedSkin,
+                trailSkin: skin.id,
+                orbitSkin: _appearanceStore.selectedOrbit,
+                coreSkin: _appearanceStore.selectedCore,
               ),
             ),
       ],
@@ -2080,6 +2143,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     required CosmeticShopCategory category,
     required CosmeticRarity rarity,
     required ShipSkinId playerSkin,
+    required TrailSkinId trailSkin,
     required OrbitSkinId orbitSkin,
     required CoreSkinId coreSkin,
   }) {
@@ -2090,6 +2154,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
         category: category,
         rarity: rarity,
         playerSkin: playerSkin,
+        trailSkin: trailSkin,
         orbitSkin: orbitSkin,
         coreSkin: coreSkin,
       ),
@@ -2881,6 +2946,26 @@ class _Star {
 }
 
 class _OrbitPainter extends CustomPainter {
+  static final Map<TrailSkinId, List<Paint>> _trailParticlePaints = {
+    for (final entry in trailVisualStyles.entries)
+      entry.key: List<Paint>.generate(
+        3,
+        (index) => Paint()
+          ..color = Color(entry.value.color).withValues(
+            alpha: entry.value.particleAlpha + .06 * index,
+          ),
+      ),
+  };
+  static final Map<TrailSkinId, List<Paint>> _trailGlowPaints = {
+    for (final entry in trailVisualStyles.entries)
+      entry.key: List<Paint>.generate(
+        3,
+        (index) => Paint()
+          ..color = Color(entry.value.color).withValues(
+            alpha: entry.value.glowAlpha * (index + 1) / 3,
+          ),
+      ),
+  };
   static final List<_Star> _stars = List<_Star>.generate(70, (i) {
     final x = (math.sin(i * 127.1) * 43758.5).abs() % 1;
     final y = (math.sin(i * 71.7 + 2) * 11923.4).abs() % 1;
@@ -2904,6 +2989,7 @@ class _OrbitPainter extends CustomPainter {
     required this.shieldLane,
     required this.shieldActive,
     required this.playerSkin,
+    required this.trailSkin,
     required this.orbitSkin,
     required this.coreSkin,
   });
@@ -2914,6 +3000,7 @@ class _OrbitPainter extends CustomPainter {
   final int? shieldLane;
   final bool shieldActive;
   final ShipSkinId playerSkin;
+  final TrailSkinId trailSkin;
   final OrbitSkinId orbitSkin;
   final CoreSkinId coreSkin;
 
@@ -3231,15 +3318,26 @@ class _OrbitPainter extends CustomPainter {
     final position =
         center + Offset(math.cos(angle) * radius, math.sin(angle) * radius);
     final color = _skinColor(playerSkin);
+    final particlePaints = _trailParticlePaints[trailSkin]!;
+    final glowPaints = _trailGlowPaints[trailSkin]!;
     for (var i = 3; i >= 1; i--) {
+      final particleIndex = 3 - i;
       final trailAngle = angle - i * .055;
       final trailPoint =
           center +
           Offset(math.cos(trailAngle) * radius, math.sin(trailAngle) * radius);
+      final particleRadius = 8 * (1 - i * .16);
+      if (trailSkin != TrailSkinId.classic) {
+        canvas.drawCircle(
+          trailPoint,
+          particleRadius * 1.8,
+          glowPaints[particleIndex],
+        );
+      }
       canvas.drawCircle(
         trailPoint,
-        8 * (1 - i * .16),
-        Paint()..color = color.withValues(alpha: .10 + .06 * (3 - i)),
+        particleRadius,
+        particlePaints[particleIndex],
       );
     }
     canvas.drawCircle(
@@ -3342,6 +3440,7 @@ class _CosmeticPreviewDialog extends StatelessWidget {
     required this.category,
     required this.rarity,
     required this.playerSkin,
+    required this.trailSkin,
     required this.orbitSkin,
     required this.coreSkin,
   });
@@ -3350,11 +3449,12 @@ class _CosmeticPreviewDialog extends StatelessWidget {
   final CosmeticShopCategory category;
   final CosmeticRarity rarity;
   final ShipSkinId playerSkin;
+  final TrailSkinId trailSkin;
   final OrbitSkinId orbitSkin;
   final CoreSkinId coreSkin;
 
   String get _sceneLabel =>
-      'Preview scene: ship=${playerSkin.name}; orbit=${orbitSkin.name}; core=${coreSkin.name}';
+      'Preview scene: ship=${playerSkin.name}; orbit=${orbitSkin.name}; core=${coreSkin.name}; trail=${trailSkin.name}';
 
   @override
   Widget build(BuildContext context) => Dialog(
@@ -3428,6 +3528,7 @@ class _CosmeticPreviewDialog extends StatelessWidget {
                             shieldLane: null,
                             shieldActive: false,
                             playerSkin: playerSkin,
+                            trailSkin: trailSkin,
                             orbitSkin: orbitSkin,
                             coreSkin: coreSkin,
                           ),
@@ -3577,14 +3678,18 @@ extension on CosmeticShopCategory {
     CosmeticShopCategory.ship => 'SHIP',
     CosmeticShopCategory.orbit => 'ORBIT',
     CosmeticShopCategory.core => 'CORE',
+    CosmeticShopCategory.trail => 'TRAIL',
   };
 
   String get sectionTitle => switch (this) {
     CosmeticShopCategory.ship => 'SHIP SKINS',
     CosmeticShopCategory.orbit => 'ORBIT SKINS',
     CosmeticShopCategory.core => 'CORE SKINS',
+    CosmeticShopCategory.trail => 'TRAIL SKINS',
   };
 }
+
+Color _trailColor(TrailSkinId skin) => Color(trailVisualStyles[skin]!.color);
 
 Color _skinColor(ShipSkinId skin) => switch (skin) {
   ShipSkinId.defaultSkin => const Color(0xff60efff),
