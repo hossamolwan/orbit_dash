@@ -1969,36 +1969,73 @@ class _OrbitGamePageState extends State<OrbitGamePage>
         _cosmeticCategoryTabs(),
         _cosmeticSectionTitle(_selectedShopCategory.sectionTitle),
         if (_selectedShopCategory == CosmeticShopCategory.ship)
-          for (final skin in shipSkins) _skinOption(skin)
+          for (final skin in shipSkins)
+            _cosmeticItemWithPreview(
+              key: 'ship-${skin.id.name}',
+              name: skin.name,
+              option: _skinOption(skin),
+              onPreview: () => _showCosmeticPreview(
+                name: skin.name,
+                category: CosmeticShopCategory.ship,
+                rarity: skin.rarity,
+                playerSkin: skin.id,
+                orbitSkin: _appearanceStore.selectedOrbit,
+                coreSkin: _appearanceStore.selectedCore,
+              ),
+            )
         else if (_selectedShopCategory == CosmeticShopCategory.orbit)
           for (final skin in orbitSkins)
-            _appearanceOption(
-              key: 'orbit-option-${skin.id.name}',
+            _cosmeticItemWithPreview(
+              key: 'orbit-${skin.id.name}',
               name: skin.name,
-              description: skin.description,
-              rarity: skin.rarity,
-              price: skin.price,
-              owned:
-                  skin.id == OrbitSkinId.defaultOrbit ||
-                  _wallet.owns(skin.itemId),
-              selected: _appearanceStore.selectedOrbit == skin.id,
-              accent: _orbitColor(skin.id),
-              onSelect: () => _selectOrbitSkin(skin.id),
+              option: _appearanceOption(
+                key: 'orbit-option-${skin.id.name}',
+                name: skin.name,
+                description: skin.description,
+                rarity: skin.rarity,
+                price: skin.price,
+                owned:
+                    skin.id == OrbitSkinId.defaultOrbit ||
+                    _wallet.owns(skin.itemId),
+                selected: _appearanceStore.selectedOrbit == skin.id,
+                accent: _orbitColor(skin.id),
+                onSelect: () => _selectOrbitSkin(skin.id),
+              ),
+              onPreview: () => _showCosmeticPreview(
+                name: skin.name,
+                category: CosmeticShopCategory.orbit,
+                rarity: skin.rarity,
+                playerSkin: _skinStore.selectedSkin,
+                orbitSkin: skin.id,
+                coreSkin: _appearanceStore.selectedCore,
+              ),
             )
         else
           for (final skin in coreSkins)
-            _appearanceOption(
-              key: 'core-option-${skin.id.name}',
+            _cosmeticItemWithPreview(
+              key: 'core-${skin.id.name}',
               name: skin.name,
-              description: skin.description,
-              rarity: skin.rarity,
-              price: skin.price,
-              owned:
-                  skin.id == CoreSkinId.defaultCore ||
-                  _wallet.owns(skin.itemId),
-              selected: _appearanceStore.selectedCore == skin.id,
-              accent: _coreColor(skin.id),
-              onSelect: () => _selectCoreSkin(skin.id),
+              option: _appearanceOption(
+                key: 'core-option-${skin.id.name}',
+                name: skin.name,
+                description: skin.description,
+                rarity: skin.rarity,
+                price: skin.price,
+                owned:
+                    skin.id == CoreSkinId.defaultCore ||
+                    _wallet.owns(skin.itemId),
+                selected: _appearanceStore.selectedCore == skin.id,
+                accent: _coreColor(skin.id),
+                onSelect: () => _selectCoreSkin(skin.id),
+              ),
+              onPreview: () => _showCosmeticPreview(
+                name: skin.name,
+                category: CosmeticShopCategory.core,
+                rarity: skin.rarity,
+                playerSkin: _skinStore.selectedSkin,
+                orbitSkin: _appearanceStore.selectedOrbit,
+                coreSkin: skin.id,
+              ),
             ),
       ],
       if (showAudioControls) ...[
@@ -2013,6 +2050,51 @@ class _OrbitGamePageState extends State<OrbitGamePage>
       ),
     ],
   );
+
+  Widget _cosmeticItemWithPreview({
+    required String key,
+    required String name,
+    required Widget option,
+    required VoidCallback onPreview,
+  }) =>
+      Row(
+        children: [
+          Expanded(child: option),
+          IconButton(
+            key: ValueKey('preview-$key'),
+            tooltip: 'Preview $name',
+            visualDensity: VisualDensity.compact,
+            constraints: const BoxConstraints.tightFor(width: 36, height: 48),
+            onPressed: onPreview,
+            icon: const Icon(
+              Icons.visibility_rounded,
+              color: Color(0xff65eaff),
+              size: 19,
+            ),
+          ),
+        ],
+      );
+
+  void _showCosmeticPreview({
+    required String name,
+    required CosmeticShopCategory category,
+    required CosmeticRarity rarity,
+    required ShipSkinId playerSkin,
+    required OrbitSkinId orbitSkin,
+    required CoreSkinId coreSkin,
+  }) {
+    showDialog<void>(
+      context: context,
+      builder: (context) => _CosmeticPreviewDialog(
+        name: name,
+        category: category,
+        rarity: rarity,
+        playerSkin: playerSkin,
+        orbitSkin: orbitSkin,
+        coreSkin: coreSkin,
+      ),
+    );
+  }
 
   Widget _cosmeticCategoryTabs() => SingleChildScrollView(
     key: const ValueKey('cosmetic-category-tabs-scroll'),
@@ -3252,6 +3334,134 @@ class _OrbitPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _OrbitPainter oldDelegate) => true;
+}
+
+class _CosmeticPreviewDialog extends StatelessWidget {
+  const _CosmeticPreviewDialog({
+    required this.name,
+    required this.category,
+    required this.rarity,
+    required this.playerSkin,
+    required this.orbitSkin,
+    required this.coreSkin,
+  });
+
+  final String name;
+  final CosmeticShopCategory category;
+  final CosmeticRarity rarity;
+  final ShipSkinId playerSkin;
+  final OrbitSkinId orbitSkin;
+  final CoreSkinId coreSkin;
+
+  String get _sceneLabel =>
+      'Preview scene: ship=${playerSkin.name}; orbit=${orbitSkin.name}; core=${coreSkin.name}';
+
+  @override
+  Widget build(BuildContext context) => Dialog(
+    backgroundColor: const Color(0xed0d1427),
+    insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(24),
+      side: const BorderSide(color: Color(0x9955e7ff)),
+    ),
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 360),
+      child: SizedBox(
+        width: double.infinity,
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 8, 18, 18),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final sceneSize = math.min(220.0, constraints.maxWidth);
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: IconButton(
+                        key: const ValueKey('cosmetic-preview-close'),
+                        tooltip: 'Close preview',
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                    ),
+                    Text(
+                      name,
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 19,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      '${category.label}  ·  ${rarity == CosmeticRarity.premium ? 'PREMIUM' : 'STANDARD'}',
+                      key: const ValueKey('cosmetic-preview-category-rarity'),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Color(0xffffd66e),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1.2,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Semantics(
+                      label: _sceneLabel,
+                      child: RepaintBoundary(
+                        key: const ValueKey('cosmetic-preview-scene'),
+                        child: CustomPaint(
+                          size: Size.square(sceneSize),
+                          painter: _OrbitPainter(
+                            angle: -math.pi / 2,
+                            lane: 0,
+                            orbitCount: 2,
+                            hazards: const [],
+                            gemAngle: math.pi / 3,
+                            gemLane: 1,
+                            shieldAngle: null,
+                            shieldLane: null,
+                            shieldActive: false,
+                            playerSkin: playerSkin,
+                            orbitSkin: orbitSkin,
+                            coreSkin: coreSkin,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    const Text(
+                      'Preview only. This does not purchase or equip the cosmetic.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Color(0xffaebbd2),
+                        fontSize: 11,
+                        height: 1.35,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextButton.icon(
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.arrow_back_rounded, size: 16),
+                      label: const Text('BACK TO SHOP'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: const Color(0xff65eaff),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 class _FeatureWriteFailure {
