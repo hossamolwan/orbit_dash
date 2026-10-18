@@ -63,7 +63,7 @@ void main() {
     expect(find.text('ORBIT DASH'), findsOneWidget);
     expect(find.byTooltip('Achievements'), findsOneWidget);
     expect(find.byTooltip('Daily challenges'), findsOneWidget);
-    expect(find.byTooltip('Ship skins'), findsOneWidget);
+    expect(find.byTooltip('Cosmetic shop'), findsOneWidget);
     expect(find.byTooltip('Player statistics'), findsOneWidget);
     expect(find.byTooltip('Music on'), findsOneWidget);
     expect(find.byTooltip('Sound effects on'), findsOneWidget);
@@ -86,7 +86,7 @@ void main() {
     expect(find.byKey(const ValueKey('main-menu-gem-balance')), findsOneWidget);
     expect(find.byTooltip('Achievements'), findsOneWidget);
     expect(find.byTooltip('Daily challenges'), findsOneWidget);
-    expect(find.byTooltip('Ship skins'), findsOneWidget);
+    expect(find.byTooltip('Cosmetic shop'), findsOneWidget);
     expect(find.byTooltip('Player statistics'), findsOneWidget);
     expect(find.text('ORBIT DASH'), findsNothing);
     expect(tester.takeException(), isNull);

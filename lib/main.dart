@@ -44,6 +44,8 @@ enum RunState {
   dailyChallenges,
 }
 
+enum CosmeticShopCategory { ship, orbit, core }
+
 /// Deterministic controls and observations for game-cycle widget tests.
 class OrbitGameTestDriver {
   OrbitGameTestDriver({this.achievementPreferencesLoader});
@@ -68,6 +70,8 @@ class OrbitGameTestDriver {
   late int Function() _readShieldAbsorptions;
   late int Function() _readLosses;
   late ShipSkinId Function() _readSelectedSkin;
+  late OrbitSkinId Function() _readSelectedOrbit;
+  late CoreSkinId Function() _readSelectedCore;
   late bool Function(ShipSkinId id) _readSkinUnlocked;
   late Future<void> Function() _flushProgress;
   late void Function(Future<void> Function()) _enqueueFeatureWrite;
@@ -86,6 +90,8 @@ class OrbitGameTestDriver {
   int get shieldAbsorptions => _readShieldAbsorptions();
   int get losses => _readLosses();
   ShipSkinId get selectedSkin => _readSelectedSkin();
+  OrbitSkinId get selectedOrbit => _readSelectedOrbit();
+  CoreSkinId get selectedCore => _readSelectedCore();
   bool skinUnlocked(ShipSkinId id) => _readSkinUnlocked(id);
   Future<void> flushProgress() => _flushProgress();
   void queueFeatureWrite(Future<void> Function() write) =>
@@ -115,6 +121,8 @@ class OrbitGameTestDriver {
     required int Function() readShieldAbsorptions,
     required int Function() readLosses,
     required ShipSkinId Function() readSelectedSkin,
+    required OrbitSkinId Function() readSelectedOrbit,
+    required CoreSkinId Function() readSelectedCore,
     required bool Function(ShipSkinId id) readSkinUnlocked,
     required Future<void> Function() flushProgress,
     required void Function(Future<void> Function()) enqueueFeatureWrite,
@@ -137,6 +145,8 @@ class OrbitGameTestDriver {
     _readShieldAbsorptions = readShieldAbsorptions;
     _readLosses = readLosses;
     _readSelectedSkin = readSelectedSkin;
+    _readSelectedOrbit = readSelectedOrbit;
+    _readSelectedCore = readSelectedCore;
     _readSkinUnlocked = readSkinUnlocked;
     _flushProgress = flushProgress;
     _enqueueFeatureWrite = enqueueFeatureWrite;
@@ -427,10 +437,12 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   final StageProgressStore _stageProgressStore = StageProgressStore();
   final PlayerStatisticsStore _statisticsStore = PlayerStatisticsStore();
   final SkinStore _skinStore = SkinStore();
+  final AppearanceStore _appearanceStore = AppearanceStore();
   final GemWallet _wallet = GemWallet();
   int _pickupSequence = 0;
   int _runToken = 0;
   bool _purchaseInProgress = false;
+  CosmeticShopCategory _selectedShopCategory = CosmeticShopCategory.ship;
   late final DailyChallengeStore _dailyChallengeStore;
   bool _dailyChallengesLoaded = false;
   bool _dailyChallengesLoadFailed = false;
@@ -506,6 +518,8 @@ class _OrbitGamePageState extends State<OrbitGamePage>
       readShieldAbsorptions: () => _statisticsStore.shieldAbsorptions,
       readLosses: () => _statisticsStore.losses,
       readSelectedSkin: () => _skinStore.selectedSkin,
+      readSelectedOrbit: () => _appearanceStore.selectedOrbit,
+      readSelectedCore: () => _appearanceStore.selectedCore,
       readSkinUnlocked: (id) =>
           id == ShipSkinId.defaultSkin || _wallet.owns('ship.${id.name}'),
       flushProgress: _flushProgress,
@@ -529,6 +543,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
       }
       await _statisticsStore.load(highestUnlockedStage: _highestUnlockedStage);
       await _skinStore.load(ownedItemIds: _wallet.purchasedItemIds);
+      await _appearanceStore.load(ownedItemIds: _wallet.purchasedItemIds);
       if (mounted) {
         setState(() {
           _featureStoresLoaded = true;
@@ -564,6 +579,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     await _pendingFeatureWrites;
     await _statisticsStore.flush();
     await _skinStore.flush();
+    await _appearanceStore.flush();
     await _wallet.flush();
     await _dailyChallengeStore.flush();
     if (_featureWriteFailures.isNotEmpty) {
@@ -1009,7 +1025,10 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   }
 
   void _openSkins() {
-    setState(() => _state = RunState.skins);
+    setState(() {
+      _state = RunState.skins;
+      _selectedShopCategory = CosmeticShopCategory.ship;
+    });
     _audio.setGameState(AudioRunState.menu);
   }
 
@@ -1087,6 +1106,60 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     } finally {
       _purchaseInProgress = false;
       if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _selectOrbitSkin(OrbitSkinId id) async {
+    final skin = orbitSkins.firstWhere((item) => item.id == id);
+    if (id != OrbitSkinId.defaultOrbit && !_wallet.owns(skin.itemId)) {
+      if (_purchaseInProgress) return;
+      _purchaseInProgress = true;
+      try {
+        await _wallet.purchase(itemId: skin.itemId, price: skin.price);
+        if (mounted) setState(() {});
+      } catch (error) {
+        debugPrint('Failed to purchase orbit skin: $error');
+      } finally {
+        _purchaseInProgress = false;
+        if (mounted) setState(() {});
+      }
+      return;
+    }
+    try {
+      final selected = await _appearanceStore.selectOrbit(
+        id,
+        ownedItemIds: _wallet.purchasedItemIds,
+      );
+      if (selected && mounted) setState(() {});
+    } catch (error) {
+      debugPrint('Failed to save selected orbit skin: $error');
+    }
+  }
+
+  Future<void> _selectCoreSkin(CoreSkinId id) async {
+    final skin = coreSkins.firstWhere((item) => item.id == id);
+    if (id != CoreSkinId.defaultCore && !_wallet.owns(skin.itemId)) {
+      if (_purchaseInProgress) return;
+      _purchaseInProgress = true;
+      try {
+        await _wallet.purchase(itemId: skin.itemId, price: skin.price);
+        if (mounted) setState(() {});
+      } catch (error) {
+        debugPrint('Failed to purchase core skin: $error');
+      } finally {
+        _purchaseInProgress = false;
+        if (mounted) setState(() {});
+      }
+      return;
+    }
+    try {
+      final selected = await _appearanceStore.selectCore(
+        id,
+        ownedItemIds: _wallet.purchasedItemIds,
+      );
+      if (selected && mounted) setState(() {});
+    } catch (error) {
+      debugPrint('Failed to save selected core skin: $error');
     }
   }
 
@@ -1226,7 +1299,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                     if (_state == RunState.ready) ...[
                       IconButton(
                         onPressed: _openSkins,
-                        tooltip: 'Ship skins',
+                        tooltip: 'Cosmetic shop',
                         visualDensity: VisualDensity.compact,
                         icon: Icon(
                           Icons.palette_rounded,
@@ -1303,22 +1376,29 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                         height: side,
                         child: KeyedSubtree(
                           key: ValueKey('orbit-lane-$_lane'),
-                          child: CustomPaint(
-                            key: _shield.isActive
-                                ? const ValueKey('shield-aura-visible')
-                                : null,
-                            size: Size.square(side),
-                            painter: _OrbitPainter(
-                              angle: _angle,
-                              lane: _lane,
-                              orbitCount: _currentStage.orbitCount,
-                              hazards: List.of(_hazards),
-                              gemAngle: _gemAngle,
-                              gemLane: _gemLane,
-                              shieldAngle: _shieldPickup?.angle,
-                              shieldLane: _shieldPickup?.lane,
-                              shieldActive: _shield.isActive,
-                              playerSkin: _skinStore.selectedSkin,
+                          child: KeyedSubtree(
+                            key: ValueKey(
+                              'orbit-style-${_appearanceStore.selectedOrbit.name}-${_appearanceStore.selectedCore.name}',
+                            ),
+                            child: CustomPaint(
+                              key: _shield.isActive
+                                  ? const ValueKey('shield-aura-visible')
+                                  : null,
+                              size: Size.square(side),
+                              painter: _OrbitPainter(
+                                angle: _angle,
+                                lane: _lane,
+                                orbitCount: _currentStage.orbitCount,
+                                hazards: List.of(_hazards),
+                                gemAngle: _gemAngle,
+                                gemLane: _gemLane,
+                                shieldAngle: _shieldPickup?.angle,
+                                shieldLane: _shieldPickup?.lane,
+                                shieldActive: _shield.isActive,
+                                playerSkin: _skinStore.selectedSkin,
+                                orbitSkin: _appearanceStore.selectedOrbit,
+                                coreSkin: _appearanceStore.selectedCore,
+                              ),
                             ),
                           ),
                         ),
@@ -1333,7 +1413,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Text(
-                                  'STAGE ${_currentStage.number} · $_score/${_currentStage.targetScore}',
+                                  'STAGE ${_currentStage.number} Â· $_score/${_currentStage.targetScore}',
                                   key: const ValueKey('current-stage'),
                                   style: const TextStyle(
                                     color: Colors.white54,
@@ -1573,7 +1653,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
         if (ready) ...[
           SizedBox(height: spacing),
           Text(
-            'STAGE ${stage.number} · ${stage.name.toUpperCase()}',
+            'STAGE ${stage.number} Â· ${stage.name.toUpperCase()}',
             textAlign: TextAlign.center,
             style: const TextStyle(
               color: Color(0xffd2deef),
@@ -1584,7 +1664,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
           ),
           const SizedBox(height: 6),
           Text(
-            'TARGET ${stage.targetScore}  ·  ${stage.orbitCount} ORBITS',
+            'TARGET ${stage.targetScore}  Â·  ${stage.orbitCount} ORBITS',
             style: const TextStyle(
               color: Color(0xff8c9bb5),
               fontSize: 10,
@@ -1600,7 +1680,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
           _resultCard(label: 'CURRENT SCORE', value: '$_score'),
           const SizedBox(height: 6),
           Text(
-            'STAGE ${stage.number} · ${stage.name}',
+            'STAGE ${stage.number} Â· ${stage.name}',
             style: const TextStyle(color: Color(0xff8c9bb5), fontSize: 10),
           ),
         ],
@@ -1742,7 +1822,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
         const Padding(
           padding: EdgeInsets.symmetric(vertical: 16),
           child: Text(
-            'Loading saved progress…',
+            'Loading saved progressâ€¦',
             style: TextStyle(color: Color(0xffaebbd2), fontSize: 12),
           ),
         ),
@@ -1857,7 +1937,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
       ),
       SizedBox(height: compact ? 7 : 10),
       Text(
-        'SHIP SKINS',
+        'COSMETIC SHOP',
         textAlign: TextAlign.center,
         style: TextStyle(
           color: Colors.white,
@@ -1885,8 +1965,42 @@ class _OrbitGamePageState extends State<OrbitGamePage>
       SizedBox(height: compact ? 9 : 12),
       if (!_featureStoresLoaded)
         _progressStoreMessage()
-      else
-        for (final skin in shipSkins) _skinOption(skin),
+      else ...[
+        _cosmeticCategoryTabs(),
+        _cosmeticSectionTitle(_selectedShopCategory.sectionTitle),
+        if (_selectedShopCategory == CosmeticShopCategory.ship)
+          for (final skin in shipSkins) _skinOption(skin)
+        else if (_selectedShopCategory == CosmeticShopCategory.orbit)
+          for (final skin in orbitSkins)
+            _appearanceOption(
+              key: 'orbit-option-${skin.id.name}',
+              name: skin.name,
+              description: skin.description,
+              rarity: skin.rarity,
+              price: skin.price,
+              owned:
+                  skin.id == OrbitSkinId.defaultOrbit ||
+                  _wallet.owns(skin.itemId),
+              selected: _appearanceStore.selectedOrbit == skin.id,
+              accent: _orbitColor(skin.id),
+              onSelect: () => _selectOrbitSkin(skin.id),
+            )
+        else
+          for (final skin in coreSkins)
+            _appearanceOption(
+              key: 'core-option-${skin.id.name}',
+              name: skin.name,
+              description: skin.description,
+              rarity: skin.rarity,
+              price: skin.price,
+              owned:
+                  skin.id == CoreSkinId.defaultCore ||
+                  _wallet.owns(skin.itemId),
+              selected: _appearanceStore.selectedCore == skin.id,
+              accent: _coreColor(skin.id),
+              onSelect: () => _selectCoreSkin(skin.id),
+            ),
+      ],
       if (showAudioControls) ...[
         SizedBox(height: compact ? 5 : 8),
         _audioSettingsRow(),
@@ -1900,6 +2014,168 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     ],
   );
 
+  Widget _cosmeticCategoryTabs() => SingleChildScrollView(
+    key: const ValueKey('cosmetic-category-tabs-scroll'),
+    scrollDirection: Axis.horizontal,
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (final category in CosmeticShopCategory.values)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 3),
+            child: SizedBox(
+              width: 72,
+              child: InkWell(
+                key: ValueKey('cosmetic-tab-${category.name}'),
+                borderRadius: BorderRadius.circular(10),
+                onTap: () => setState(() => _selectedShopCategory = category),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 9),
+                  decoration: BoxDecoration(
+                    color: _selectedShopCategory == category
+                        ? const Color(0x3355e7ff)
+                        : const Color(0x221b2233),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: _selectedShopCategory == category
+                          ? const Color(0x9955e7ff)
+                          : const Color(0x337d8ba5),
+                    ),
+                  ),
+                  child: Text(
+                    category.label,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: _selectedShopCategory == category
+                          ? const Color(0xff65eaff)
+                          : const Color(0xffaebbd2),
+                      fontSize: 10,
+                      letterSpacing: 1,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    ),
+  );
+  Widget _cosmeticSectionTitle(String title) => Padding(
+    padding: const EdgeInsets.only(top: 8, bottom: 5),
+    child: Align(
+      alignment: Alignment.centerLeft,
+      child: Text(
+        title,
+        style: const TextStyle(
+          color: Color(0xff65eaff),
+          fontSize: 10,
+          letterSpacing: 1.5,
+          fontWeight: FontWeight.w900,
+        ),
+      ),
+    ),
+  );
+
+  Widget _appearanceOption({
+    required String key,
+    required String name,
+    required String description,
+    required CosmeticRarity rarity,
+    required int price,
+    required bool owned,
+    required bool selected,
+    required Color accent,
+    required Future<void> Function() onSelect,
+  }) {
+    final canAfford = _wallet.balance >= price;
+    final state = selected
+        ? 'EQUIPPED'
+        : owned
+        ? 'OWNED Â· EQUIP'
+        : canAfford
+        ? 'BUY Â· $price GEMS'
+        : 'NEED ${price - _wallet.balance} MORE';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: SizedBox(
+        width: double.infinity,
+        height: 58,
+        child: OutlinedButton(
+          key: ValueKey(key),
+          onPressed: owned || canAfford ? () => unawaited(onSelect()) : null,
+          style: OutlinedButton.styleFrom(
+            alignment: Alignment.centerLeft,
+            padding: const EdgeInsets.symmetric(horizontal: 11),
+            foregroundColor: Colors.white,
+            disabledForegroundColor: Colors.white38,
+            side: BorderSide(
+              color: selected
+                  ? accent.withValues(alpha: .7)
+                  : const Color(0x337d8ba5),
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                owned ? Icons.auto_awesome_rounded : Icons.lock_outline,
+                color: owned ? accent : Colors.white38,
+                size: 20,
+              ),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    Text(
+                      '${rarity == CosmeticRarity.premium ? 'PREMIUM' : 'STANDARD'}  Â·  $price GEMS  Â·  $description',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xff9baac3),
+                        fontSize: 9,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Text(
+                state,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: selected
+                      ? accent
+                      : owned
+                      ? Colors.white70
+                      : canAfford
+                      ? const Color(0xffffd66e)
+                      : Colors.white38,
+                  fontSize: 8,
+                  letterSpacing: .5,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _skinOption(ShipSkin skin) {
     final owned =
         skin.id == ShipSkinId.defaultSkin || _wallet.owns(skin.itemId);
@@ -1908,9 +2184,9 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     final state = selected
         ? 'EQUIPPED'
         : owned
-        ? 'OWNED · EQUIP'
+        ? 'OWNED Â· EQUIP'
         : canAfford
-        ? 'BUY · ${skin.price} GEMS'
+        ? 'BUY Â· ${skin.price} GEMS'
         : 'NEED ${skin.price - _wallet.balance} MORE';
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
@@ -1951,13 +2227,15 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                   children: [
                     Text(
                       skin.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w800,
                       ),
                     ),
                     Text(
-                      '${skin.rarity == CosmeticRarity.premium ? 'PREMIUM' : 'STANDARD'}  ·  ${skin.description}',
+                      '${skin.rarity == CosmeticRarity.premium ? 'PREMIUM' : 'STANDARD'}  Â·  ${skin.description}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -1970,6 +2248,8 @@ class _OrbitGamePageState extends State<OrbitGamePage>
               ),
               Text(
                 state,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   color: selected
                       ? _skinColor(skin.id)
@@ -2094,7 +2374,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
             Text(
               _dailyChallengesLoadFailed
                   ? 'Could not load daily challenges. Saved progress is unchanged.'
-                  : 'Loading daily challenges…',
+                  : 'Loading daily challengesâ€¦',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: _dailyChallengesLoadFailed
@@ -2174,7 +2454,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  '${challenge.progress} / ${definition.goal}  ·  ${definition.gemReward} gems',
+                  '${challenge.progress} / ${definition.goal}  Â·  ${definition.gemReward} gems',
                   key: ValueKey('daily-progress-${definition.id}'),
                   style: const TextStyle(
                     color: Color(0xffaebbd2),
@@ -2236,7 +2516,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
       Text(
         _featureStoreLoadFailed
             ? 'Could not load saved progress. Existing data was left unchanged.'
-            : 'Loading saved progress…',
+            : 'Loading saved progressâ€¦',
         textAlign: TextAlign.center,
         style: TextStyle(
           color: _featureStoreLoadFailed
@@ -2348,7 +2628,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                       ),
                     ),
                     Text(
-                      '${stage.targetScore} points · ${stage.orbitCount} orbits',
+                      '${stage.targetScore} points Â· ${stage.orbitCount} orbits',
                       style: const TextStyle(
                         color: Color(0xff9baac3),
                         fontSize: 10,
@@ -2542,6 +2822,8 @@ class _OrbitPainter extends CustomPainter {
     required this.shieldLane,
     required this.shieldActive,
     required this.playerSkin,
+    required this.orbitSkin,
+    required this.coreSkin,
   });
   final double angle, gemAngle;
   final int lane, gemLane, orbitCount;
@@ -2550,6 +2832,8 @@ class _OrbitPainter extends CustomPainter {
   final int? shieldLane;
   final bool shieldActive;
   final ShipSkinId playerSkin;
+  final OrbitSkinId orbitSkin;
+  final CoreSkinId coreSkin;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -2576,11 +2860,12 @@ class _OrbitPainter extends CustomPainter {
       );
     }
     for (final r in geometry.radii) {
+      final orbitColors = _orbitPalette(orbitSkin);
       canvas.drawCircle(
         center,
         r,
         Paint()
-          ..color = const Color(0xff50dff8).withValues(alpha: .055)
+          ..color = orbitColors.glow.withValues(alpha: .055)
           ..style = PaintingStyle.stroke
           ..strokeWidth = 7,
       );
@@ -2588,7 +2873,7 @@ class _OrbitPainter extends CustomPainter {
         center,
         r,
         Paint()
-          ..color = const Color(0xff75dcf5).withValues(alpha: .64)
+          ..color = orbitColors.stroke.withValues(alpha: .64)
           ..style = PaintingStyle.stroke
           ..strokeWidth = 1.35,
       );
@@ -2682,7 +2967,7 @@ class _OrbitPainter extends CustomPainter {
 
   void _orbitMarkers(Canvas canvas, Offset center, List<double> radii) {
     final paint = Paint()
-      ..color = const Color(0xff8cecff).withValues(alpha: .35)
+      ..color = _orbitPalette(orbitSkin).marker.withValues(alpha: .35)
       ..strokeWidth = 1;
     for (int i = 0; i < 12; i++) {
       final angle = i * _fullTurn / 12;
@@ -2729,23 +3014,19 @@ class _OrbitPainter extends CustomPainter {
   }
 
   void _planet(Canvas c, Offset center, double r) {
+    final colors = _corePalette(coreSkin);
     c.drawCircle(
       center,
       r * 1.25,
-      Paint()..color = const Color(0xff455cff).withValues(alpha: .11),
+      Paint()..color = colors.glow.withValues(alpha: .11),
     );
     c.drawCircle(
       center,
       r,
       Paint()
-        ..shader = const RadialGradient(
+        ..shader = RadialGradient(
           center: Alignment(-.4, -.5),
-          colors: [
-            Color(0xffd8a0ff),
-            Color(0xff5f56bb),
-            Color(0xff201d54),
-            Color(0xff10152f),
-          ],
+          colors: colors.gradient,
           stops: [0, .35, .78, 1],
         ).createShader(Rect.fromCircle(center: center, radius: r)),
     );
@@ -2765,7 +3046,7 @@ class _OrbitPainter extends CustomPainter {
       c.drawPath(
         band,
         Paint()
-          ..color = const Color(0xffd9bdff).withValues(alpha: .13)
+          ..color = colors.band.withValues(alpha: .13)
           ..style = PaintingStyle.stroke
           ..strokeWidth = i.isEven ? r * .09 : r * .045,
       );
@@ -2780,7 +3061,7 @@ class _OrbitPainter extends CustomPainter {
       c.drawCircle(
         craterCenter,
         r * .095,
-        Paint()..color = const Color(0xff17183e).withValues(alpha: .28),
+        Paint()..color = colors.crater.withValues(alpha: .28),
       );
       c.drawArc(
         Rect.fromCircle(center: craterCenter, radius: r * .095),
@@ -2788,7 +3069,7 @@ class _OrbitPainter extends CustomPainter {
         math.pi * .9,
         false,
         Paint()
-          ..color = const Color(0xffe4caff).withValues(alpha: .3)
+          ..color = colors.craterRim.withValues(alpha: .3)
           ..style = PaintingStyle.stroke
           ..strokeWidth = .65,
       );
@@ -2800,7 +3081,7 @@ class _OrbitPainter extends CustomPainter {
       math.pi * .72,
       false,
       Paint()
-        ..color = const Color(0xfff0d5ff).withValues(alpha: .48)
+        ..color = colors.highlight.withValues(alpha: .48)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.5,
     );
@@ -2808,7 +3089,7 @@ class _OrbitPainter extends CustomPainter {
       center,
       r,
       Paint()
-        ..color = const Color(0xffa9a0ff).withValues(alpha: .35)
+        ..color = colors.outline.withValues(alpha: .35)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1,
     );
@@ -2978,6 +3259,121 @@ class _FeatureWriteFailure {
 
   final Object error;
   final StackTrace stackTrace;
+}
+
+class _OrbitColors {
+  const _OrbitColors(this.glow, this.stroke, this.marker);
+  final Color glow;
+  final Color stroke;
+  final Color marker;
+}
+
+class _CoreColors {
+  const _CoreColors({
+    required this.glow,
+    required this.gradient,
+    required this.band,
+    required this.crater,
+    required this.craterRim,
+    required this.highlight,
+    required this.outline,
+  });
+  final Color glow;
+  final List<Color> gradient;
+  final Color band;
+  final Color crater;
+  final Color craterRim;
+  final Color highlight;
+  final Color outline;
+}
+
+_OrbitColors _orbitPalette(OrbitSkinId skin) => switch (skin) {
+  OrbitSkinId.defaultOrbit => const _OrbitColors(
+    Color(0xff50dff8),
+    Color(0xff75dcf5),
+    Color(0xff8cecff),
+  ),
+  OrbitSkinId.aurora => const _OrbitColors(
+    Color(0xff39ed9d),
+    Color(0xff75f0b7),
+    Color(0xffa2ffd0),
+  ),
+  OrbitSkinId.solar => const _OrbitColors(
+    Color(0xffffa83b),
+    Color(0xffffd078),
+    Color(0xffffe2a6),
+  ),
+};
+
+_CoreColors _corePalette(CoreSkinId skin) => switch (skin) {
+  CoreSkinId.defaultCore => const _CoreColors(
+    glow: Color(0xff455cff),
+    gradient: [
+      Color(0xffd8a0ff),
+      Color(0xff5f56bb),
+      Color(0xff201d54),
+      Color(0xff10152f),
+    ],
+    band: Color(0xffd9bdff),
+    crater: Color(0xff17183e),
+    craterRim: Color(0xffe4caff),
+    highlight: Color(0xfff0d5ff),
+    outline: Color(0xffa9a0ff),
+  ),
+  CoreSkinId.crimson => const _CoreColors(
+    glow: Color(0xffef412f),
+    gradient: [
+      Color(0xffffbd8e),
+      Color(0xffd94d3f),
+      Color(0xff70242f),
+      Color(0xff281521),
+    ],
+    band: Color(0xffffa47c),
+    crater: Color(0xff481c2a),
+    craterRim: Color(0xffffb28c),
+    highlight: Color(0xffffc3a1),
+    outline: Color(0xffff765f),
+  ),
+  CoreSkinId.glacier => const _CoreColors(
+    glow: Color(0xff46cfff),
+    gradient: [
+      Color(0xffe2ffff),
+      Color(0xff6bc9e8),
+      Color(0xff24638f),
+      Color(0xff101e3a),
+    ],
+    band: Color(0xffc1f7ff),
+    crater: Color(0xff163c62),
+    craterRim: Color(0xffd8ffff),
+    highlight: Color(0xffd6ffff),
+    outline: Color(0xff79e7ff),
+  ),
+};
+
+Color _orbitColor(OrbitSkinId skin) => switch (skin) {
+  OrbitSkinId.defaultOrbit => const Color(0xff50dff8),
+  OrbitSkinId.aurora => const Color(0xff39ed9d),
+  OrbitSkinId.solar => const Color(0xffffa83b),
+};
+
+Color _coreColor(CoreSkinId skin) => switch (skin) {
+  CoreSkinId.defaultCore => const Color(0xffa9a0ff),
+  CoreSkinId.crimson => const Color(0xffff765f),
+  CoreSkinId.glacier => const Color(0xff79e7ff),
+};
+
+extension on CosmeticShopCategory {
+  String get label => switch (this) {
+    CosmeticShopCategory.ship => 'SHIP',
+    CosmeticShopCategory.orbit => 'ORBIT',
+    CosmeticShopCategory.core => 'CORE',
+  };
+
+  String get sectionTitle => switch (this) {
+    CosmeticShopCategory.ship => 'SHIP SKINS',
+    CosmeticShopCategory.orbit => 'ORBIT SKINS',
+    CosmeticShopCategory.core => 'CORE SKINS',
+  };
 }
 
 Color _skinColor(ShipSkinId skin) => switch (skin) {

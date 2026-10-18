@@ -33,7 +33,7 @@ void main() {
 
     expect(driver.skinUnlocked(ShipSkinId.emerald), isFalse);
     expect(driver.skinUnlocked(ShipSkinId.nebula), isFalse);
-    await tester.tap(find.byTooltip('Ship skins'));
+    await tester.tap(find.byTooltip('Cosmetic shop'));
     await tester.pumpAndSettle();
     expect(
       find.byKey(const ValueKey('skin-option-defaultSkin')),

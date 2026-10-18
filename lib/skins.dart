@@ -2,11 +2,15 @@ import 'dart:async';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
-enum CosmeticCategory { ship }
+enum CosmeticCategory { ship, orbit, core }
 
 enum CosmeticRarity { standard, premium }
 
 enum ShipSkinId { defaultSkin, emerald, nebula, solar, supernova }
+
+enum OrbitSkinId { defaultOrbit, aurora, solar }
+
+enum CoreSkinId { defaultCore, crimson, glacier }
 
 class ShipSkin {
   const ShipSkin({
@@ -69,6 +73,198 @@ const shipSkins = <ShipSkin>[
     price: 300,
   ),
 ];
+
+class OrbitSkin {
+  const OrbitSkin({
+    required this.id,
+    required this.category,
+    required this.name,
+    required this.description,
+    required this.rarity,
+    required this.price,
+  });
+
+  final OrbitSkinId id;
+  final CosmeticCategory category;
+  String get itemId => 'orbit.${id.name}';
+  final String name;
+  final String description;
+  final CosmeticRarity rarity;
+  final int price;
+}
+
+const orbitSkins = <OrbitSkin>[
+  OrbitSkin(
+    id: OrbitSkinId.defaultOrbit,
+    category: CosmeticCategory.orbit,
+    name: 'Default Orbit',
+    description: 'The original cyan orbital rings.',
+    rarity: CosmeticRarity.standard,
+    price: 0,
+  ),
+  OrbitSkin(
+    id: OrbitSkinId.aurora,
+    category: CosmeticCategory.orbit,
+    name: 'Aurora Orbit',
+    description: 'An emerald orbital glow.',
+    rarity: CosmeticRarity.standard,
+    price: 40,
+  ),
+  OrbitSkin(
+    id: OrbitSkinId.solar,
+    category: CosmeticCategory.orbit,
+    name: 'Solar Orbit',
+    description: 'A golden solar flare.',
+    rarity: CosmeticRarity.premium,
+    price: 175,
+  ),
+];
+
+class CoreSkin {
+  const CoreSkin({
+    required this.id,
+    required this.category,
+    required this.name,
+    required this.description,
+    required this.rarity,
+    required this.price,
+  });
+
+  final CoreSkinId id;
+  final CosmeticCategory category;
+  String get itemId => 'core.${id.name}';
+  final String name;
+  final String description;
+  final CosmeticRarity rarity;
+  final int price;
+}
+
+const coreSkins = <CoreSkin>[
+  CoreSkin(
+    id: CoreSkinId.defaultCore,
+    category: CosmeticCategory.core,
+    name: 'Default Core',
+    description: 'The original nebula core.',
+    rarity: CosmeticRarity.standard,
+    price: 0,
+  ),
+  CoreSkin(
+    id: CoreSkinId.crimson,
+    category: CosmeticCategory.core,
+    name: 'Crimson Core',
+    description: 'A blazing crimson surface.',
+    rarity: CosmeticRarity.standard,
+    price: 50,
+  ),
+  CoreSkin(
+    id: CoreSkinId.glacier,
+    category: CosmeticCategory.core,
+    name: 'Glacier Core',
+    description: 'An icy blue core.',
+    rarity: CosmeticRarity.premium,
+    price: 200,
+  ),
+];
+
+/// Stores appearance selections independently from wallet ownership.
+class AppearanceStore {
+  AppearanceStore({Future<SharedPreferences> Function()? loadPreferences})
+    : _loadPreferences = loadPreferences ?? SharedPreferences.getInstance;
+
+  static const selectedOrbitKey = 'orbit_dash_selected_orbit_v1';
+  static const selectedCoreKey = 'orbit_dash_selected_core_v1';
+  final Future<SharedPreferences> Function() _loadPreferences;
+  OrbitSkinId _selectedOrbit = OrbitSkinId.defaultOrbit;
+  CoreSkinId _selectedCore = CoreSkinId.defaultCore;
+  Future<void> _tail = Future<void>.value();
+
+  OrbitSkinId get selectedOrbit => _selectedOrbit;
+  CoreSkinId get selectedCore => _selectedCore;
+  Future<void> flush() => _tail;
+
+  Future<void> load({Set<String> ownedItemIds = const {}}) =>
+      _serialize(() async {
+        final prefs = await _loadPreferences();
+        final orbitValue = _readString(prefs, selectedOrbitKey);
+        final coreValue = _readString(prefs, selectedCoreKey);
+        final orbit = OrbitSkinId.values
+            .where((id) => id.name == orbitValue)
+            .firstOrNull;
+        final core = CoreSkinId.values
+            .where((id) => id.name == coreValue)
+            .firstOrNull;
+        _selectedOrbit =
+            orbit != null &&
+                (orbit == OrbitSkinId.defaultOrbit ||
+                    ownedItemIds.contains('orbit.${orbit.name}'))
+            ? orbit
+            : OrbitSkinId.defaultOrbit;
+        _selectedCore =
+            core != null &&
+                (core == CoreSkinId.defaultCore ||
+                    ownedItemIds.contains('core.${core.name}'))
+            ? core
+            : CoreSkinId.defaultCore;
+        if (_selectedOrbit.name != orbitValue) {
+          await _save(prefs, selectedOrbitKey, _selectedOrbit.name);
+        }
+        if (_selectedCore.name != coreValue) {
+          await _save(prefs, selectedCoreKey, _selectedCore.name);
+        }
+      });
+
+  Future<bool> selectOrbit(
+    OrbitSkinId id, {
+    required Set<String> ownedItemIds,
+  }) => _serialize(() async {
+    if (id != OrbitSkinId.defaultOrbit &&
+        !ownedItemIds.contains('orbit.${id.name}')) {
+      return false;
+    }
+    final prefs = await _loadPreferences();
+    await _save(prefs, selectedOrbitKey, id.name);
+    _selectedOrbit = id;
+    return true;
+  });
+
+  Future<bool> selectCore(CoreSkinId id, {required Set<String> ownedItemIds}) =>
+      _serialize(() async {
+        if (id != CoreSkinId.defaultCore &&
+            !ownedItemIds.contains('core.${id.name}')) {
+          return false;
+        }
+        final prefs = await _loadPreferences();
+        await _save(prefs, selectedCoreKey, id.name);
+        _selectedCore = id;
+        return true;
+      });
+
+  String? _readString(SharedPreferences prefs, String key) {
+    try {
+      return prefs.getString(key);
+    } on TypeError {
+      return null;
+    }
+  }
+
+  Future<void> _save(SharedPreferences prefs, String key, String value) async {
+    if (!await prefs.setString(key, value)) {
+      throw StateError('Appearance selection was not persisted.');
+    }
+  }
+
+  Future<T> _serialize<T>(Future<T> Function() action) async {
+    final previous = _tail;
+    final done = Completer<void>();
+    _tail = done.future;
+    await previous;
+    try {
+      return await action();
+    } finally {
+      done.complete();
+    }
+  }
+}
 
 class SkinStore {
   SkinStore({Future<SharedPreferences> Function()? loadPreferences})

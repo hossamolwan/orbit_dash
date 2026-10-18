@@ -134,6 +134,134 @@ void main() {
       },
     );
 
+    test(
+      'orbit and core catalogs have stable IDs, prices, rarity and defaults',
+      () {
+        expect(orbitSkins.map((skin) => skin.itemId), [
+          'orbit.defaultOrbit',
+          'orbit.aurora',
+          'orbit.solar',
+        ]);
+        expect(orbitSkins.map((skin) => skin.price), [0, 40, 175]);
+        expect(
+          orbitSkins.every((skin) => skin.category == CosmeticCategory.orbit),
+          isTrue,
+        );
+        expect(orbitSkins[1].rarity, CosmeticRarity.standard);
+        expect(orbitSkins[2].rarity, CosmeticRarity.premium);
+        expect(coreSkins.map((skin) => skin.itemId), [
+          'core.defaultCore',
+          'core.crimson',
+          'core.glacier',
+        ]);
+        expect(coreSkins.map((skin) => skin.price), [0, 50, 200]);
+        expect(
+          coreSkins.every((skin) => skin.category == CosmeticCategory.core),
+          isTrue,
+        );
+        expect(coreSkins[1].rarity, CosmeticRarity.standard);
+        expect(coreSkins[2].rarity, CosmeticRarity.premium);
+        expect(
+          CosmeticCategory.values,
+          containsAll([
+            CosmeticCategory.ship,
+            CosmeticCategory.orbit,
+            CosmeticCategory.core,
+          ]),
+        );
+      },
+    );
+
+    test(
+      'orbit and core purchases and selections persist independently',
+      () async {
+        final wallet = GemWallet();
+        await wallet.load();
+        await wallet.creditPickupOnce('gift', 465);
+        for (final skin in orbitSkins.skip(1)) {
+          expect(
+            await wallet.purchase(itemId: skin.itemId, price: skin.price),
+            isTrue,
+          );
+        }
+        for (final skin in coreSkins.skip(1)) {
+          expect(
+            await wallet.purchase(itemId: skin.itemId, price: skin.price),
+            isTrue,
+          );
+        }
+        expect(wallet.balance, 0);
+        expect(
+          await wallet.purchase(itemId: 'orbit.aurora', price: 40),
+          isFalse,
+        );
+
+        final appearances = AppearanceStore();
+        await appearances.load(ownedItemIds: wallet.purchasedItemIds);
+        expect(
+          await appearances.selectOrbit(
+            OrbitSkinId.aurora,
+            ownedItemIds: wallet.purchasedItemIds,
+          ),
+          isTrue,
+        );
+        expect(
+          await appearances.selectCore(
+            CoreSkinId.glacier,
+            ownedItemIds: wallet.purchasedItemIds,
+          ),
+          isTrue,
+        );
+        final restoredWallet = GemWallet();
+        await restoredWallet.load();
+        final restored = AppearanceStore();
+        await restored.load(ownedItemIds: restoredWallet.purchasedItemIds);
+        expect(restored.selectedOrbit, OrbitSkinId.aurora);
+        expect(restored.selectedCore, CoreSkinId.glacier);
+        expect(restoredWallet.owns('orbit.aurora'), isTrue);
+        expect(restoredWallet.owns('core.glacier'), isTrue);
+        expect(restoredWallet.balance, 0);
+      },
+    );
+
+    test(
+      'invalid and unowned appearance selections fall back to defaults',
+      () async {
+        SharedPreferences.setMockInitialValues({
+          AppearanceStore.selectedOrbitKey: 'solar',
+          AppearanceStore.selectedCoreKey: 'unknown',
+        });
+        final appearances = AppearanceStore();
+        await appearances.load();
+        expect(appearances.selectedOrbit, OrbitSkinId.defaultOrbit);
+        expect(appearances.selectedCore, CoreSkinId.defaultCore);
+
+        final preferences = await SharedPreferences.getInstance();
+        await preferences.setString(AppearanceStore.selectedOrbitKey, 'aurora');
+        await preferences.setString(AppearanceStore.selectedCoreKey, 'crimson');
+        final unowned = AppearanceStore();
+        await unowned.load(ownedItemIds: {'ship.solar'});
+        expect(unowned.selectedOrbit, OrbitSkinId.defaultOrbit);
+        expect(unowned.selectedCore, CoreSkinId.defaultCore);
+        expect(
+          await unowned.selectOrbit(OrbitSkinId.aurora, ownedItemIds: {}),
+          isFalse,
+        );
+        expect(
+          await unowned.selectCore(CoreSkinId.crimson, ownedItemIds: {}),
+          isFalse,
+        );
+        expect(
+          await unowned.selectOrbit(OrbitSkinId.defaultOrbit, ownedItemIds: {}),
+          isTrue,
+        );
+        expect(
+          await unowned.selectCore(CoreSkinId.defaultCore, ownedItemIds: {}),
+          isTrue,
+        );
+      },
+    );
+
     test('persists equipped skin and ignores legacy ownership keys', () async {
       final wallet = GemWallet();
       await wallet.load();
