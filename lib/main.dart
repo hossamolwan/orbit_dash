@@ -659,7 +659,12 @@ class _OrbitGamePageState extends State<OrbitGamePage>
             children: [
               const Icon(Icons.emoji_events_rounded, color: Color(0xffffd66e)),
               const SizedBox(width: 10),
-              Expanded(child: Text('${definition.title} unlocked!')),
+              Expanded(
+                child: Text(
+                  '${definition.title} unlocked!',
+                  style: const TextStyle(color: Colors.white),
+                ),
+              ),
             ],
           ),
         ),
@@ -1156,10 +1161,36 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                 ),
                 child: Row(
                   children: [
-                    const Icon(
-                      Icons.blur_circular,
-                      color: Color(0xff5ae8ff),
-                      size: 22,
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xff1b2233),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0x66ffd66e)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.diamond_rounded,
+                            color: Color(0xffffd66e),
+                            size: 17,
+                          ),
+                          const SizedBox(width: 5),
+                          Text(
+                            '${_wallet.balance} G',
+                            key: const ValueKey('main-menu-gem-balance'),
+                            style: const TextStyle(
+                              color: Color(0xffffd66e),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                     const SizedBox(width: 9),
                     if (!compactWidth)
