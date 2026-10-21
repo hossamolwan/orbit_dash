@@ -6,10 +6,28 @@ import 'package:orbit_dash/gem_wallet.dart';
 import 'package:orbit_dash/skins.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+TextSpan _spanWithText(InlineSpan span, String target) {
+  if (span is TextSpan) {
+    if (span.text == target) return span;
+    for (final child in span.children ?? const <InlineSpan>[]) {
+      try {
+        return _spanWithText(child, target);
+      } on StateError {
+        // Keep looking through sibling spans.
+      }
+    }
+  }
+  throw StateError('No TextSpan found for "$target"');
+}
+
+void _expectRarityColor(RichText richText, String label, Color color) {
+  expect(_spanWithText(richText.text, label).style?.color, color);
+}
+
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  testWidgets('shop lists standard cosmetics before premium in every tab', (
+  testWidgets('shop sorts cosmetics by rarity and price in every tab', (
     tester,
   ) async {
     final driver = OrbitGameTestDriver();
@@ -27,15 +45,15 @@ void main() {
       Iterable<T> skins,
       String Function(T) id,
       CosmeticRarity Function(T) rarity,
+      int Function(T) price,
       String prefix,
-    ) => [
-      ...skins
-          .where((skin) => rarity(skin) == CosmeticRarity.standard)
-          .map((skin) => '$prefix-option-${id(skin)}'),
-      ...skins
-          .where((skin) => rarity(skin) == CosmeticRarity.premium)
-          .map((skin) => '$prefix-option-${id(skin)}'),
-    ];
+    ) =>
+        ([...skins]..sort((a, b) {
+              final tier = rarity(a).index.compareTo(rarity(b).index);
+              return tier != 0 ? tier : price(a).compareTo(price(b));
+            }))
+            .map((skin) => '$prefix-option-${id(skin)}')
+            .toList();
 
     Future<void> expectCategoryOrder(
       String category,
@@ -63,6 +81,7 @@ void main() {
         shipSkins,
         (skin) => skin.id.name,
         (skin) => skin.rarity,
+        (skin) => skin.price,
         'skin',
       ),
     );
@@ -73,6 +92,7 @@ void main() {
         orbitSkins,
         (skin) => skin.id.name,
         (skin) => skin.rarity,
+        (skin) => skin.price,
         'orbit',
       ),
     );
@@ -83,6 +103,7 @@ void main() {
         coreSkins,
         (skin) => skin.id.name,
         (skin) => skin.rarity,
+        (skin) => skin.price,
         'core',
       ),
     );
@@ -93,8 +114,154 @@ void main() {
         trailSkins,
         (skin) => skin.id.name,
         (skin) => skin.rarity,
+        (skin) => skin.price,
         'trail',
       ),
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('rarity colors stay consistent across cosmetic categories', (
+    tester,
+  ) async {
+    final driver = OrbitGameTestDriver();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: OrbitGamePage(audioController: _ShopAudio(), testDriver: driver),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await driver.flushProgress();
+    await tester.tap(find.byTooltip('Cosmetic shop'));
+    await tester.pumpAndSettle();
+
+    const rarityColors = <String, Color>{
+      'FREE': Color(0xFFD1D5DB),
+      'COMMON': Color(0xFF9CA3AF),
+      'RARE': Color(0xFF3B82F6),
+      'EPIC': Color(0xFFA855F7),
+      'LEGENDARY': Color(0xFFF59E0B),
+    };
+
+    Future<void> expectOption(
+      String category,
+      String optionKey,
+      String label,
+      Color color, {
+      String? details,
+    }) async {
+      if (category != 'ship') {
+        final tab = find.byKey(ValueKey('cosmetic-tab-$category'));
+        await tester.ensureVisible(tab);
+        await tester.tap(tab);
+        await tester.pumpAndSettle();
+      }
+      final option = find.byKey(ValueKey(optionKey));
+      await tester.ensureVisible(option);
+      final button = tester.widget<OutlinedButton>(option);
+      final rarityText = tester
+          .widgetList<RichText>(
+            find.descendant(of: option, matching: find.byType(RichText)),
+          )
+          .firstWhere(
+            (richText) => richText.text.toPlainText().contains(label),
+          );
+      _expectRarityColor(rarityText, label, color);
+      final metadata = tester
+          .widgetList<Text>(
+            find.descendant(of: option, matching: find.byType(Text)),
+          )
+          .firstWhere(
+            (text) => text.textSpan?.toPlainText().contains(label) ?? false,
+          );
+      expect(metadata.style?.color, const Color(0xff9baac3));
+      expect(metadata.style?.fontSize, 9);
+      final name = tester.widget<Text>(
+        find.descendant(of: option, matching: find.byType(Text)).first,
+      );
+      expect(name.style?.color, Colors.white);
+      expect(button.style?.foregroundColor?.resolve({}), Colors.white);
+      if (details != null) {
+        expect(rarityText.text.toPlainText(), contains(details));
+        if (details.contains('GEMS')) {
+          final priceText = details.substring(0, details.indexOf(' GEMS') + 5);
+          expect(
+            _spanWithText(rarityText.text, priceText).style?.color,
+            Colors.white,
+          );
+        }
+      }
+      if (optionKey == 'skin-option-emerald') {
+        final state = tester.widget<Text>(find.text('NEED 40 MORE'));
+        expect(state.style?.color, Colors.white38);
+      }
+      if (label != 'FREE') {
+        final lock = tester.widget<Icon>(
+          find.descendant(
+            of: option,
+            matching: find.byIcon(Icons.lock_outline),
+          ),
+        );
+        expect(lock.color, color);
+      } else {
+        final ownedIcon = tester.widget<Icon>(
+          find.descendant(of: option, matching: find.byType(Icon)).first,
+        );
+        expect(ownedIcon.color, isNot(color));
+      }
+    }
+
+    await expectOption(
+      'ship',
+      'skin-option-defaultSkin',
+      'FREE',
+      rarityColors['FREE']!,
+      details: 'The original orbital glow.',
+    );
+    await expectOption(
+      'ship',
+      'skin-option-emerald',
+      'COMMON',
+      rarityColors['COMMON']!,
+      details: 'A bright emerald trail.',
+    );
+    await expectOption(
+      'ship',
+      'skin-option-solar',
+      'RARE',
+      rarityColors['RARE']!,
+      details: 'A warm solar flare.',
+    );
+    await expectOption(
+      'ship',
+      'skin-option-supernova',
+      'EPIC',
+      rarityColors['EPIC']!,
+    );
+    await expectOption(
+      'ship',
+      'skin-option-inferno',
+      'LEGENDARY',
+      rarityColors['LEGENDARY']!,
+    );
+    await expectOption(
+      'orbit',
+      'orbit-option-solar',
+      'RARE',
+      rarityColors['RARE']!,
+      details: '200 GEMS',
+    );
+    await expectOption(
+      'core',
+      'core-option-voidCore',
+      'EPIC',
+      rarityColors['EPIC']!,
+    );
+    await expectOption(
+      'trail',
+      'trail-option-stardust',
+      'LEGENDARY',
+      rarityColors['LEGENDARY']!,
     );
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -128,6 +295,22 @@ void main() {
       findsNothing,
     );
     expect(find.byKey(const ValueKey('core-option-defaultCore')), findsNothing);
+    final shipSolar = find.byKey(const ValueKey('skin-option-solar'));
+    final shipSolarBuyText = tester
+        .widgetList<Text>(
+          find.descendant(of: shipSolar, matching: find.byType(Text)),
+        )
+        .firstWhere(
+          (text) => text.textSpan?.toPlainText().startsWith('BUY - ') ?? false,
+        );
+    expect(
+      _spanWithText(shipSolarBuyText.textSpan!, 'BUY - ').style?.color,
+      const Color(0xffffd66e),
+    );
+    expect(
+      _spanWithText(shipSolarBuyText.textSpan!, '250 GEMS').style?.color,
+      Colors.white,
+    );
 
     final orbitTab = find.byKey(const ValueKey('cosmetic-tab-orbit'));
     await tester.ensureVisible(orbitTab);
@@ -143,6 +326,33 @@ void main() {
 
     final aurora = find.byKey(const ValueKey('orbit-option-aurora'));
     await tester.ensureVisible(aurora);
+    final auroraMetadata = tester
+        .widgetList<Text>(
+          find.descendant(of: aurora, matching: find.byType(Text)),
+        )
+        .firstWhere(
+          (text) =>
+              text.textSpan?.toPlainText().startsWith('COMMON |') ?? false,
+        );
+    expect(
+      _spanWithText(auroraMetadata.textSpan!, '60 GEMS').style?.color,
+      Colors.white,
+    );
+    final auroraBuyText = tester
+        .widgetList<Text>(
+          find.descendant(of: aurora, matching: find.byType(Text)),
+        )
+        .firstWhere(
+          (text) => text.textSpan?.toPlainText().startsWith('BUY - ') ?? false,
+        );
+    expect(
+      _spanWithText(auroraBuyText.textSpan!, '60 GEMS').style?.color,
+      Colors.white,
+    );
+    expect(
+      _spanWithText(auroraBuyText.textSpan!, 'BUY - ').style?.color,
+      const Color(0xffffd66e),
+    );
     await tester.tap(aurora);
     await tester.pumpAndSettle();
     expect(driver.walletBalance, 240);
@@ -328,8 +538,13 @@ void main() {
     final metadata = tester.widget<Text>(
       find.byKey(const ValueKey('cosmetic-preview-category-rarity')),
     );
-    expect(metadata.data, contains('SHIP'));
-    expect(metadata.data, contains('PREMIUM'));
+    expect(metadata.textSpan!.toPlainText(), contains('SHIP'));
+    expect(metadata.textSpan!.toPlainText(), contains('EPIC'));
+    expect(metadata.style?.color, const Color(0xffffd66e));
+    expect(
+      _spanWithText(metadata.textSpan!, 'EPIC').style?.color,
+      const Color(0xFFA855F7),
+    );
     expect(find.textContaining('PREVIEW ONLY'), findsNothing);
     expect(find.textContaining('does not purchase or equip'), findsOneWidget);
     expect(driver.walletBalance, 0);

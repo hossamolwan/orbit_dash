@@ -4,7 +4,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 enum CosmeticCategory { ship, orbit, core, trail }
 
-enum CosmeticRarity { standard, premium }
+enum CosmeticRarity { free, common, rare, epic, legendary }
+
+extension CosmeticRarityLabel on CosmeticRarity {
+  String get label => name.toUpperCase();
+}
 
 enum ShipSkinId {
   defaultSkin,
@@ -419,70 +423,70 @@ const trailSkins = <TrailSkin>[
     id: TrailSkinId.classic,
     name: 'Classic Trail',
     description: 'The original cyan trail.',
-    rarity: CosmeticRarity.standard,
+    rarity: CosmeticRarity.free,
     price: 0,
   ),
   TrailSkin(
     id: TrailSkinId.aurora,
     name: 'Aurora Trail',
     description: 'Soft emerald particles.',
-    rarity: CosmeticRarity.standard,
+    rarity: CosmeticRarity.common,
     price: 100,
   ),
   TrailSkin(
     id: TrailSkinId.solar,
     name: 'Solar Trail',
     description: 'A warm golden flare.',
-    rarity: CosmeticRarity.standard,
+    rarity: CosmeticRarity.rare,
     price: 350,
   ),
   TrailSkin(
     id: TrailSkinId.frost,
     name: 'Frost Trail',
     description: 'Icy blue particles with crystalline sparks.',
-    rarity: CosmeticRarity.standard,
+    rarity: CosmeticRarity.rare,
     price: 450,
   ),
   TrailSkin(
     id: TrailSkinId.phantom,
     name: 'Phantom Trail',
     description: 'Violet spectral motes fade behind the ship.',
-    rarity: CosmeticRarity.standard,
+    rarity: CosmeticRarity.epic,
     price: 550,
   ),
   TrailSkin(
     id: TrailSkinId.electric,
     name: 'Electric Trail',
     description: 'Bright cyan particles flash with sharp sparks.',
-    rarity: CosmeticRarity.standard,
+    rarity: CosmeticRarity.epic,
     price: 700,
   ),
   TrailSkin(
     id: TrailSkinId.ember,
     name: 'Ember Trail',
     description: 'Warm red and orange embers drift behind.',
-    rarity: CosmeticRarity.premium,
+    rarity: CosmeticRarity.epic,
     price: 850,
   ),
   TrailSkin(
     id: TrailSkinId.stardust,
     name: 'Stardust Trail',
     description: 'Purple and blue particles sparkle like stars.',
-    rarity: CosmeticRarity.premium,
+    rarity: CosmeticRarity.legendary,
     price: 1000,
   ),
   TrailSkin(
     id: TrailSkinId.toxic,
     name: 'Toxic Trail',
     description: 'Vivid green particles leave a bubbling wake.',
-    rarity: CosmeticRarity.premium,
+    rarity: CosmeticRarity.legendary,
     price: 1150,
   ),
   TrailSkin(
     id: TrailSkinId.spectrum,
     name: 'Spectrum Trail',
     description: 'Particles split into a shifting spectrum.',
-    rarity: CosmeticRarity.premium,
+    rarity: CosmeticRarity.legendary,
     price: 1350,
   ),
 ];
@@ -601,7 +605,7 @@ const shipSkins = <ShipSkin>[
     name: 'Default',
     description: 'The original orbital glow.',
     category: CosmeticCategory.ship,
-    rarity: CosmeticRarity.standard,
+    rarity: CosmeticRarity.free,
     price: 0,
   ),
   ShipSkin(
@@ -609,7 +613,7 @@ const shipSkins = <ShipSkin>[
     name: 'Emerald',
     description: 'A bright emerald trail.',
     category: CosmeticCategory.ship,
-    rarity: CosmeticRarity.standard,
+    rarity: CosmeticRarity.common,
     price: 40,
   ),
   ShipSkin(
@@ -617,7 +621,7 @@ const shipSkins = <ShipSkin>[
     name: 'Nebula',
     description: 'A shimmering nebula glow.',
     category: CosmeticCategory.ship,
-    rarity: CosmeticRarity.standard,
+    rarity: CosmeticRarity.common,
     price: 100,
   ),
   ShipSkin(
@@ -625,7 +629,7 @@ const shipSkins = <ShipSkin>[
     name: 'Solar',
     description: 'A warm solar flare.',
     category: CosmeticCategory.ship,
-    rarity: CosmeticRarity.premium,
+    rarity: CosmeticRarity.rare,
     price: 250,
   ),
   ShipSkin(
@@ -633,7 +637,7 @@ const shipSkins = <ShipSkin>[
     name: 'Supernova',
     description: 'A vivid supernova burst.',
     category: CosmeticCategory.ship,
-    rarity: CosmeticRarity.premium,
+    rarity: CosmeticRarity.epic,
     price: 500,
   ),
   ShipSkin(
@@ -641,7 +645,7 @@ const shipSkins = <ShipSkin>[
     name: 'Obsidian',
     description: 'Graphite armor with a violet energy edge.',
     category: CosmeticCategory.ship,
-    rarity: CosmeticRarity.premium,
+    rarity: CosmeticRarity.epic,
     price: 650,
   ),
   ShipSkin(
@@ -649,7 +653,7 @@ const shipSkins = <ShipSkin>[
     name: 'Prism',
     description: 'A faceted body split by spectral color.',
     category: CosmeticCategory.ship,
-    rarity: CosmeticRarity.premium,
+    rarity: CosmeticRarity.epic,
     price: 800,
   ),
   ShipSkin(
@@ -657,7 +661,7 @@ const shipSkins = <ShipSkin>[
     name: 'Inferno',
     description: 'A flame-shaped hull with molten light.',
     category: CosmeticCategory.ship,
-    rarity: CosmeticRarity.premium,
+    rarity: CosmeticRarity.legendary,
     price: 950,
   ),
   ShipSkin(
@@ -665,7 +669,7 @@ const shipSkins = <ShipSkin>[
     name: 'Frostbite',
     description: 'A sharp crystal edged in arctic light.',
     category: CosmeticCategory.ship,
-    rarity: CosmeticRarity.premium,
+    rarity: CosmeticRarity.legendary,
     price: 1100,
   ),
   ShipSkin(
@@ -673,7 +677,7 @@ const shipSkins = <ShipSkin>[
     name: 'Phantom',
     description: 'A spectral crescent with a violet glow.',
     category: CosmeticCategory.ship,
-    rarity: CosmeticRarity.premium,
+    rarity: CosmeticRarity.legendary,
     price: 1250,
   ),
 ];
@@ -703,7 +707,7 @@ const orbitSkins = <OrbitSkin>[
     category: CosmeticCategory.orbit,
     name: 'Default Orbit',
     description: 'The original cyan orbital rings.',
-    rarity: CosmeticRarity.standard,
+    rarity: CosmeticRarity.free,
     price: 0,
   ),
   OrbitSkin(
@@ -711,7 +715,7 @@ const orbitSkins = <OrbitSkin>[
     category: CosmeticCategory.orbit,
     name: 'Aurora Orbit',
     description: 'An emerald orbital glow.',
-    rarity: CosmeticRarity.standard,
+    rarity: CosmeticRarity.common,
     price: 60,
   ),
   OrbitSkin(
@@ -719,7 +723,7 @@ const orbitSkins = <OrbitSkin>[
     category: CosmeticCategory.orbit,
     name: 'Solar Orbit',
     description: 'A golden solar flare.',
-    rarity: CosmeticRarity.standard,
+    rarity: CosmeticRarity.rare,
     price: 200,
   ),
   OrbitSkin(
@@ -727,7 +731,7 @@ const orbitSkins = <OrbitSkin>[
     category: CosmeticCategory.orbit,
     name: 'Eclipse',
     description: 'A shadowed violet orbit edged by a luminous crescent.',
-    rarity: CosmeticRarity.premium,
+    rarity: CosmeticRarity.epic,
     price: 500,
   ),
   OrbitSkin(
@@ -735,7 +739,7 @@ const orbitSkins = <OrbitSkin>[
     category: CosmeticCategory.orbit,
     name: 'Plasma',
     description: 'Jagged magenta energy arcs crackle along the orbit.',
-    rarity: CosmeticRarity.premium,
+    rarity: CosmeticRarity.epic,
     price: 600,
   ),
   OrbitSkin(
@@ -743,7 +747,7 @@ const orbitSkins = <OrbitSkin>[
     category: CosmeticCategory.orbit,
     name: 'Ion',
     description: 'An electric blue ring with cyan sparks.',
-    rarity: CosmeticRarity.premium,
+    rarity: CosmeticRarity.epic,
     price: 750,
   ),
   OrbitSkin(
@@ -751,7 +755,7 @@ const orbitSkins = <OrbitSkin>[
     category: CosmeticCategory.orbit,
     name: 'Pulsar',
     description: 'A stellar ring punctuated by bright pulses.',
-    rarity: CosmeticRarity.premium,
+    rarity: CosmeticRarity.legendary,
     price: 900,
   ),
   OrbitSkin(
@@ -759,7 +763,7 @@ const orbitSkins = <OrbitSkin>[
     category: CosmeticCategory.orbit,
     name: 'Void',
     description: 'A deep-space ring with pale violet markers.',
-    rarity: CosmeticRarity.standard,
+    rarity: CosmeticRarity.rare,
     price: 300,
   ),
   OrbitSkin(
@@ -767,7 +771,7 @@ const orbitSkins = <OrbitSkin>[
     category: CosmeticCategory.orbit,
     name: 'Prism Orbit',
     description: 'Multitone markers refract around the ring.',
-    rarity: CosmeticRarity.premium,
+    rarity: CosmeticRarity.legendary,
     price: 1200,
   ),
   OrbitSkin(
@@ -775,7 +779,7 @@ const orbitSkins = <OrbitSkin>[
     category: CosmeticCategory.orbit,
     name: 'Radiant',
     description: 'A bright celestial gold and white orbit.',
-    rarity: CosmeticRarity.standard,
+    rarity: CosmeticRarity.rare,
     price: 400,
   ),
 ];
@@ -805,7 +809,7 @@ const coreSkins = <CoreSkin>[
     category: CosmeticCategory.core,
     name: 'Default Core',
     description: 'The original nebula core.',
-    rarity: CosmeticRarity.standard,
+    rarity: CosmeticRarity.free,
     price: 0,
   ),
   CoreSkin(
@@ -813,7 +817,7 @@ const coreSkins = <CoreSkin>[
     category: CosmeticCategory.core,
     name: 'Crimson Core',
     description: 'A blazing crimson surface.',
-    rarity: CosmeticRarity.standard,
+    rarity: CosmeticRarity.common,
     price: 75,
   ),
   CoreSkin(
@@ -821,7 +825,7 @@ const coreSkins = <CoreSkin>[
     category: CosmeticCategory.core,
     name: 'Glacier Core',
     description: 'An icy blue core.',
-    rarity: CosmeticRarity.standard,
+    rarity: CosmeticRarity.rare,
     price: 300,
   ),
   CoreSkin(
@@ -829,7 +833,7 @@ const coreSkins = <CoreSkin>[
     category: CosmeticCategory.core,
     name: 'Toxic Core',
     description: 'A neon green world alive with toxic bubbles.',
-    rarity: CosmeticRarity.premium,
+    rarity: CosmeticRarity.rare,
     price: 450,
   ),
   CoreSkin(
@@ -837,7 +841,7 @@ const coreSkins = <CoreSkin>[
     category: CosmeticCategory.core,
     name: 'Void Core',
     description: 'A dark cosmic sphere rimmed in violet.',
-    rarity: CosmeticRarity.premium,
+    rarity: CosmeticRarity.epic,
     price: 600,
   ),
   CoreSkin(
@@ -845,7 +849,7 @@ const coreSkins = <CoreSkin>[
     category: CosmeticCategory.core,
     name: 'Magma Core',
     description: 'Molten orange fissures cross a volcanic world.',
-    rarity: CosmeticRarity.premium,
+    rarity: CosmeticRarity.epic,
     price: 750,
   ),
   CoreSkin(
@@ -853,7 +857,7 @@ const coreSkins = <CoreSkin>[
     category: CosmeticCategory.core,
     name: 'Ocean Core',
     description: 'Deep blue gradients and flowing currents.',
-    rarity: CosmeticRarity.premium,
+    rarity: CosmeticRarity.legendary,
     price: 900,
   ),
   CoreSkin(
@@ -861,7 +865,7 @@ const coreSkins = <CoreSkin>[
     category: CosmeticCategory.core,
     name: 'Rose Core',
     description: 'Pink rose bands with luminous highlights.',
-    rarity: CosmeticRarity.premium,
+    rarity: CosmeticRarity.legendary,
     price: 1050,
   ),
   CoreSkin(
@@ -869,7 +873,7 @@ const coreSkins = <CoreSkin>[
     category: CosmeticCategory.core,
     name: 'Stellar Core',
     description: 'A radiant star suspended in a cosmic mantle.',
-    rarity: CosmeticRarity.premium,
+    rarity: CosmeticRarity.legendary,
     price: 1200,
   ),
   CoreSkin(
@@ -877,7 +881,7 @@ const coreSkins = <CoreSkin>[
     category: CosmeticCategory.core,
     name: 'Quantum Core',
     description: 'Geometric fields shift through blue and violet.',
-    rarity: CosmeticRarity.premium,
+    rarity: CosmeticRarity.legendary,
     price: 1400,
   ),
 ];

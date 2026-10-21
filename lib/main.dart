@@ -11,6 +11,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+Color _cosmeticRarityColor(CosmeticRarity rarity) => switch (rarity) {
+  CosmeticRarity.free => const Color(0xFFD1D5DB),
+  CosmeticRarity.common => const Color(0xFF9CA3AF),
+  CosmeticRarity.rare => const Color(0xFF3B82F6),
+  CosmeticRarity.epic => const Color(0xFFA855F7),
+  CosmeticRarity.legendary => const Color(0xFFF59E0B),
+};
+
 void main() => runApp(const OrbitDashApp());
 
 class OrbitDashApp extends StatelessWidget {
@@ -1903,7 +1911,11 @@ class _OrbitGamePageState extends State<OrbitGamePage>
         _cosmeticCategoryTabs(),
         _cosmeticSectionTitle(_selectedShopCategory.sectionTitle),
         if (_selectedShopCategory == CosmeticShopCategory.ship)
-          for (final skin in _skinsByRarity(shipSkins, (skin) => skin.rarity))
+          for (final skin in _skinsByRarity(
+            shipSkins,
+            (skin) => skin.rarity,
+            (skin) => skin.price,
+          ))
             _cosmeticItemWithPreview(
               key: 'ship-${skin.id.name}',
               name: skin.name,
@@ -1919,7 +1931,11 @@ class _OrbitGamePageState extends State<OrbitGamePage>
               ),
             )
         else if (_selectedShopCategory == CosmeticShopCategory.orbit)
-          for (final skin in _skinsByRarity(orbitSkins, (skin) => skin.rarity))
+          for (final skin in _skinsByRarity(
+            orbitSkins,
+            (skin) => skin.rarity,
+            (skin) => skin.price,
+          ))
             _cosmeticItemWithPreview(
               key: 'orbit-${skin.id.name}',
               name: skin.name,
@@ -1947,7 +1963,11 @@ class _OrbitGamePageState extends State<OrbitGamePage>
               ),
             )
         else if (_selectedShopCategory == CosmeticShopCategory.core)
-          for (final skin in _skinsByRarity(coreSkins, (skin) => skin.rarity))
+          for (final skin in _skinsByRarity(
+            coreSkins,
+            (skin) => skin.rarity,
+            (skin) => skin.price,
+          ))
             _cosmeticItemWithPreview(
               key: 'core-${skin.id.name}',
               name: skin.name,
@@ -1975,7 +1995,11 @@ class _OrbitGamePageState extends State<OrbitGamePage>
               ),
             )
         else if (_selectedShopCategory == CosmeticShopCategory.trail)
-          for (final skin in _skinsByRarity(trailSkins, (skin) => skin.rarity))
+          for (final skin in _skinsByRarity(
+            trailSkins,
+            (skin) => skin.rarity,
+            (skin) => skin.price,
+          ))
             _cosmeticItemWithPreview(
               key: 'trail-${skin.id.name}',
               name: skin.name,
@@ -2064,10 +2088,12 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   List<T> _skinsByRarity<T>(
     List<T> skins,
     CosmeticRarity Function(T) rarityOf,
-  ) => [
-    ...skins.where((skin) => rarityOf(skin) == CosmeticRarity.standard),
-    ...skins.where((skin) => rarityOf(skin) == CosmeticRarity.premium),
-  ];
+    int Function(T) priceOf,
+  ) => [...skins]
+    ..sort((a, b) {
+      final rarityOrder = rarityOf(a).index.compareTo(rarityOf(b).index);
+      return rarityOrder != 0 ? rarityOrder : priceOf(a).compareTo(priceOf(b));
+    });
 
   Widget _cosmeticCategoryTabs() => SingleChildScrollView(
     key: const ValueKey('cosmetic-category-tabs-scroll'),
@@ -2151,6 +2177,13 @@ class _OrbitGamePageState extends State<OrbitGamePage>
         : canAfford
         ? 'BUY - $price GEMS'
         : 'NEED ${price - _wallet.balance} MORE';
+    final statusColor = selected
+        ? accent
+        : owned
+        ? Colors.white70
+        : canAfford
+        ? const Color(0xffffd66e)
+        : Colors.white38;
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: SizedBox(
@@ -2177,7 +2210,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
             children: [
               Icon(
                 owned ? Icons.auto_awesome_rounded : Icons.lock_outline,
-                color: owned ? accent : Colors.white38,
+                color: owned ? accent : _cosmeticRarityColor(rarity),
                 size: 20,
               ),
               const SizedBox(width: 9),
@@ -2191,12 +2224,28 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
+                        color: Colors.white,
                         fontSize: 12,
                         fontWeight: FontWeight.w800,
                       ),
                     ),
-                    Text(
-                      '${rarity == CosmeticRarity.premium ? 'PREMIUM' : 'STANDARD'} | $price GEMS | $description',
+                    Text.rich(
+                      TextSpan(
+                        children: [
+                          TextSpan(
+                            text: rarity.label,
+                            style: TextStyle(
+                              color: _cosmeticRarityColor(rarity),
+                            ),
+                          ),
+                          const TextSpan(text: ' | '),
+                          TextSpan(
+                            text: '$price GEMS',
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                          TextSpan(text: ' | $description'),
+                        ],
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -2207,23 +2256,41 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                   ],
                 ),
               ),
-              Text(
-                state,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: selected
-                      ? accent
-                      : owned
-                      ? Colors.white70
-                      : canAfford
-                      ? const Color(0xffffd66e)
-                      : Colors.white38,
-                  fontSize: 8,
-                  letterSpacing: .5,
-                  fontWeight: FontWeight.w800,
+              if (state.startsWith('BUY - '))
+                Text.rich(
+                  TextSpan(
+                    children: [
+                      TextSpan(
+                        text: 'BUY - ',
+                        style: TextStyle(color: statusColor),
+                      ),
+                      TextSpan(
+                        text: '$price GEMS',
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                    ],
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: statusColor,
+                    fontSize: 8,
+                    letterSpacing: .5,
+                    fontWeight: FontWeight.w800,
+                  ),
+                )
+              else
+                Text(
+                  state,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: statusColor,
+                    fontSize: 8,
+                    letterSpacing: .5,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
-              ),
             ],
           ),
         ),
@@ -2243,6 +2310,13 @@ class _OrbitGamePageState extends State<OrbitGamePage>
         : canAfford
         ? 'BUY - ${skin.price} GEMS'
         : 'NEED ${skin.price - _wallet.balance} MORE';
+    final statusColor = selected
+        ? _skinColor(skin.id)
+        : owned
+        ? Colors.white70
+        : canAfford
+        ? const Color(0xffffd66e)
+        : Colors.white38;
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: SizedBox(
@@ -2271,7 +2345,9 @@ class _OrbitGamePageState extends State<OrbitGamePage>
             children: [
               Icon(
                 owned ? _skinIcon(skin.id) : Icons.lock_outline,
-                color: owned ? _skinColor(skin.id) : Colors.white38,
+                color: owned
+                    ? _skinColor(skin.id)
+                    : _cosmeticRarityColor(skin.rarity),
                 size: 20,
               ),
               const SizedBox(width: 9),
@@ -2285,12 +2361,23 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
+                        color: Colors.white,
                         fontSize: 12,
                         fontWeight: FontWeight.w800,
                       ),
                     ),
-                    Text(
-                      '${skin.rarity == CosmeticRarity.premium ? 'PREMIUM' : 'STANDARD'} | ${skin.description}',
+                    Text.rich(
+                      TextSpan(
+                        children: [
+                          TextSpan(
+                            text: skin.rarity.label,
+                            style: TextStyle(
+                              color: _cosmeticRarityColor(skin.rarity),
+                            ),
+                          ),
+                          TextSpan(text: ' | ${skin.description}'),
+                        ],
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -2301,23 +2388,41 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                   ],
                 ),
               ),
-              Text(
-                state,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: selected
-                      ? _skinColor(skin.id)
-                      : owned
-                      ? Colors.white70
-                      : canAfford
-                      ? const Color(0xffffd66e)
-                      : Colors.white38,
-                  fontSize: 8,
-                  letterSpacing: .5,
-                  fontWeight: FontWeight.w800,
+              if (state.startsWith('BUY - '))
+                Text.rich(
+                  TextSpan(
+                    children: [
+                      TextSpan(
+                        text: 'BUY - ',
+                        style: TextStyle(color: statusColor),
+                      ),
+                      TextSpan(
+                        text: '${skin.price} GEMS',
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                    ],
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: statusColor,
+                    fontSize: 8,
+                    letterSpacing: .5,
+                    fontWeight: FontWeight.w800,
+                  ),
+                )
+              else
+                Text(
+                  state,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: statusColor,
+                    fontSize: 8,
+                    letterSpacing: .5,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
-              ),
             ],
           ),
         ),
@@ -3868,8 +3973,18 @@ class _CosmeticPreviewDialog extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 5),
-                    Text(
-                      '${category.label} | ${rarity == CosmeticRarity.premium ? 'PREMIUM' : 'STANDARD'}',
+                    Text.rich(
+                      TextSpan(
+                        children: [
+                          TextSpan(text: '${category.label} | '),
+                          TextSpan(
+                            text: rarity.label,
+                            style: TextStyle(
+                              color: _cosmeticRarityColor(rarity),
+                            ),
+                          ),
+                        ],
+                      ),
                       key: const ValueKey('cosmetic-preview-category-rarity'),
                       textAlign: TextAlign.center,
                       style: const TextStyle(

@@ -107,65 +107,62 @@ void main() {
       expect(wallet.balance, 0);
     });
 
-    test(
-      'purchase ledger supports standard and premium catalog entries',
-      () async {
-        expect(shipSkins.length, 10);
-        expect(shipSkins.map((skin) => skin.itemId), [
-          'ship.defaultSkin',
-          'ship.emerald',
-          'ship.nebula',
-          'ship.solar',
-          'ship.supernova',
-          'ship.obsidian',
-          'ship.prism',
-          'ship.inferno',
-          'ship.frostbite',
-          'ship.phantom',
-        ]);
-        expect(shipSkins.map((skin) => skin.price), [
-          0,
-          40,
-          100,
-          250,
-          500,
-          650,
-          800,
-          950,
-          1100,
-          1250,
-        ]);
-        expect(
-          shipSkins
-              .map((skin) => skin.price)
-              .followedBy(orbitSkins.map((skin) => skin.price))
-              .followedBy(coreSkins.map((skin) => skin.price))
-              .where((price) => price > 0)
-              .fold<int>(0, (total, price) => total + price),
-          17275,
-        );
-        expect(shipSkins[1].rarity, CosmeticRarity.standard);
-        expect(shipSkins[3].rarity, CosmeticRarity.premium);
-        final wallet = GemWallet();
-        await wallet.load();
-        await wallet.creditPickupOnce('gift', 375);
-        expect(
-          await wallet.purchase(
-            itemId: shipSkins[1].itemId,
-            price: shipSkins[1].price,
-          ),
-          isTrue,
-        );
-        expect(
-          await wallet.purchase(
-            itemId: shipSkins[3].itemId,
-            price: shipSkins[3].price,
-          ),
-          isTrue,
-        );
-        expect(wallet.balance, 85);
-      },
-    );
+    test('purchase ledger supports cosmetics across rarity tiers', () async {
+      expect(shipSkins.length, 10);
+      expect(shipSkins.map((skin) => skin.itemId), [
+        'ship.defaultSkin',
+        'ship.emerald',
+        'ship.nebula',
+        'ship.solar',
+        'ship.supernova',
+        'ship.obsidian',
+        'ship.prism',
+        'ship.inferno',
+        'ship.frostbite',
+        'ship.phantom',
+      ]);
+      expect(shipSkins.map((skin) => skin.price), [
+        0,
+        40,
+        100,
+        250,
+        500,
+        650,
+        800,
+        950,
+        1100,
+        1250,
+      ]);
+      expect(
+        shipSkins
+            .map((skin) => skin.price)
+            .followedBy(orbitSkins.map((skin) => skin.price))
+            .followedBy(coreSkins.map((skin) => skin.price))
+            .where((price) => price > 0)
+            .fold<int>(0, (total, price) => total + price),
+        17275,
+      );
+      expect(shipSkins[1].rarity, CosmeticRarity.common);
+      expect(shipSkins[3].rarity, CosmeticRarity.rare);
+      final wallet = GemWallet();
+      await wallet.load();
+      await wallet.creditPickupOnce('gift', 375);
+      expect(
+        await wallet.purchase(
+          itemId: shipSkins[1].itemId,
+          price: shipSkins[1].price,
+        ),
+        isTrue,
+      );
+      expect(
+        await wallet.purchase(
+          itemId: shipSkins[3].itemId,
+          price: shipSkins[3].price,
+        ),
+        isTrue,
+      );
+      expect(wallet.balance, 85);
+    });
 
     test(
       'orbit and core catalogs have stable IDs, prices, rarity and defaults',
@@ -199,8 +196,8 @@ void main() {
           orbitSkins.every((skin) => skin.category == CosmeticCategory.orbit),
           isTrue,
         );
-        expect(orbitSkins[1].rarity, CosmeticRarity.standard);
-        expect(orbitSkins[2].rarity, CosmeticRarity.standard);
+        expect(orbitSkins[1].rarity, CosmeticRarity.common);
+        expect(orbitSkins[2].rarity, CosmeticRarity.rare);
         expect(coreSkins.length, 10);
         expect(coreSkins.map((skin) => skin.itemId), [
           'core.defaultCore',
@@ -230,8 +227,8 @@ void main() {
           coreSkins.every((skin) => skin.category == CosmeticCategory.core),
           isTrue,
         );
-        expect(coreSkins[1].rarity, CosmeticRarity.standard);
-        expect(coreSkins[2].rarity, CosmeticRarity.standard);
+        expect(coreSkins[1].rarity, CosmeticRarity.common);
+        expect(coreSkins[2].rarity, CosmeticRarity.rare);
         expect(
           CosmeticCategory.values,
           containsAll([
@@ -279,49 +276,52 @@ void main() {
     });
 
     test('all 40 cosmetics have the approved rarity by stable item ID', () {
-      const standard = CosmeticRarity.standard;
-      const premium = CosmeticRarity.premium;
+      const free = CosmeticRarity.free;
+      const common = CosmeticRarity.common;
+      const rare = CosmeticRarity.rare;
+      const epic = CosmeticRarity.epic;
+      const legendary = CosmeticRarity.legendary;
       const expected = <String, CosmeticRarity>{
-        'ship.defaultSkin': standard,
-        'ship.emerald': standard,
-        'ship.nebula': standard,
-        'ship.solar': premium,
-        'ship.supernova': premium,
-        'ship.obsidian': premium,
-        'ship.prism': premium,
-        'ship.inferno': premium,
-        'ship.frostbite': premium,
-        'ship.phantom': premium,
-        'orbit.defaultOrbit': standard,
-        'orbit.aurora': standard,
-        'orbit.solar': standard,
-        'orbit.eclipse': premium,
-        'orbit.plasma': premium,
-        'orbit.ion': premium,
-        'orbit.pulsar': premium,
-        'orbit.void': standard,
-        'orbit.prism': premium,
-        'orbit.radiant': standard,
-        'core.defaultCore': standard,
-        'core.crimson': standard,
-        'core.glacier': standard,
-        'core.toxic': premium,
-        'core.void': premium,
-        'core.magma': premium,
-        'core.ocean': premium,
-        'core.rose': premium,
-        'core.stellar': premium,
-        'core.quantum': premium,
-        'trail.classic': standard,
-        'trail.aurora': standard,
-        'trail.solar': standard,
-        'trail.frost': standard,
-        'trail.phantom': standard,
-        'trail.electric': standard,
-        'trail.ember': premium,
-        'trail.stardust': premium,
-        'trail.toxic': premium,
-        'trail.spectrum': premium,
+        'ship.defaultSkin': free,
+        'ship.emerald': common,
+        'ship.nebula': common,
+        'ship.solar': rare,
+        'ship.supernova': epic,
+        'ship.obsidian': epic,
+        'ship.prism': epic,
+        'ship.inferno': legendary,
+        'ship.frostbite': legendary,
+        'ship.phantom': legendary,
+        'orbit.defaultOrbit': free,
+        'orbit.aurora': common,
+        'orbit.solar': rare,
+        'orbit.eclipse': epic,
+        'orbit.plasma': epic,
+        'orbit.ion': epic,
+        'orbit.pulsar': legendary,
+        'orbit.void': rare,
+        'orbit.prism': legendary,
+        'orbit.radiant': rare,
+        'core.defaultCore': free,
+        'core.crimson': common,
+        'core.glacier': rare,
+        'core.toxic': rare,
+        'core.void': epic,
+        'core.magma': epic,
+        'core.ocean': legendary,
+        'core.rose': legendary,
+        'core.stellar': legendary,
+        'core.quantum': legendary,
+        'trail.classic': free,
+        'trail.aurora': common,
+        'trail.solar': rare,
+        'trail.frost': rare,
+        'trail.phantom': epic,
+        'trail.electric': epic,
+        'trail.ember': epic,
+        'trail.stardust': legendary,
+        'trail.toxic': legendary,
+        'trail.spectrum': legendary,
       };
       final actual = <String, CosmeticRarity>{
         for (final skin in shipSkins) skin.itemId: skin.rarity,
@@ -332,8 +332,11 @@ void main() {
 
       expect(expected.length, 40);
       expect(actual, expected);
-      expect(orbitSkins.where((skin) => skin.rarity == standard).length, 5);
-      expect(orbitSkins.where((skin) => skin.rarity == premium).length, 5);
+      expect(orbitSkins.where((skin) => skin.rarity == free).length, 1);
+      expect(orbitSkins.where((skin) => skin.rarity == common).length, 1);
+      expect(orbitSkins.where((skin) => skin.rarity == rare).length, 3);
+      expect(orbitSkins.where((skin) => skin.rarity == epic).length, 3);
+      expect(orbitSkins.where((skin) => skin.rarity == legendary).length, 2);
     });
 
     test('eclipse and plasma have dedicated orbit rendering styles', () {
@@ -397,10 +400,10 @@ void main() {
           trailSkins.every((skin) => skin.category == CosmeticCategory.trail),
           isTrue,
         );
-        expect(trailSkins[0].rarity, CosmeticRarity.standard);
+        expect(trailSkins[0].rarity, CosmeticRarity.free);
         expect(trailSkins[0].price, 0);
-        expect(trailSkins[1].rarity, CosmeticRarity.standard);
-        expect(trailSkins[2].rarity, CosmeticRarity.standard);
+        expect(trailSkins[1].rarity, CosmeticRarity.common);
+        expect(trailSkins[2].rarity, CosmeticRarity.rare);
         expect(trailSkins.skip(3).every((skin) => skin.price > 0), isTrue);
         expect(CosmeticCategory.values, contains(CosmeticCategory.trail));
       },
