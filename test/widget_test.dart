@@ -896,14 +896,62 @@ void main() {
       });
     }
 
-    test('two orbit radii preserve the original spacing', () {
+    test('five orbit radii are evenly spaced and fixed across counts', () {
+      const size = Size(360, 360);
+      final layouts = [
+        for (var count = 2; count <= 5; count++)
+          OrbitGeometry.forSizeAndCount(size, orbitCount: count),
+      ];
+      final fullLayout = layouts.last;
+
+      expect(fullLayout.radii, hasLength(5));
+      for (var lane = 0; lane < 4; lane++) {
+        final gap = fullLayout.radii[lane + 1] - fullLayout.radii[lane];
+        expect(gap, greaterThanOrEqualTo(size.width * .06));
+      }
+      for (var count = 2; count <= 5; count++) {
+        expect(layouts[count - 2].radii, fullLayout.radii.take(count));
+      }
+    });
+
+    test('two-orbit inner ring remains clear of the core glow', () {
       final geometry = OrbitGeometry.forSizeAndCount(
-        const Size(360, 360),
+        const Size(320, 320),
         orbitCount: 2,
       );
-      expect(geometry.innerRadius, closeTo(360 * .245, .0001));
-      expect(geometry.outerRadius, closeTo(360 * .34, .0001));
+      final coreGlowRadius = geometry.outerRadius * .40 * 1.25;
+      const orbitStrokeExtent = 3.5;
+
+      expect(
+        geometry.innerRadius - orbitStrokeExtent,
+        greaterThan(coreGlowRadius),
+      );
     });
+    test(
+      'outer orbit fits a compact square with the vertical center offset',
+      () {
+        const size = Size(320, 320);
+        final geometry = OrbitGeometry.forSizeAndCount(size, orbitCount: 5);
+        const artworkMargin = 4.0;
+
+        expect(
+          geometry.center.dx - geometry.outerRadius - artworkMargin,
+          greaterThanOrEqualTo(0),
+        );
+        expect(
+          geometry.center.dy - geometry.outerRadius - artworkMargin,
+          greaterThanOrEqualTo(0),
+        );
+        expect(
+          geometry.center.dx + geometry.outerRadius + artworkMargin,
+          lessThanOrEqualTo(size.width),
+        );
+        expect(
+          geometry.center.dy + geometry.outerRadius + artworkMargin,
+          lessThanOrEqualTo(size.height),
+        );
+      },
+    );
   });
 
   testWidgets('five Survival orbits remain tappable on a compact display', (
@@ -924,6 +972,30 @@ void main() {
     }
     expect(driver.score, 45);
     expect(driver.orbitCount, 5);
+    final canvasRect = tester.getRect(
+      find.byKey(const ValueKey('orbit-lane-0')),
+    );
+    final geometry = OrbitGeometry.forSizeAndCount(
+      canvasRect.size,
+      orbitCount: driver.orbitCount,
+    );
+    const artworkMargin = 4.0;
+    expect(
+      geometry.center.dx - geometry.outerRadius - artworkMargin,
+      greaterThanOrEqualTo(0),
+    );
+    expect(
+      geometry.center.dy - geometry.outerRadius - artworkMargin,
+      greaterThanOrEqualTo(0),
+    );
+    expect(
+      geometry.center.dx + geometry.outerRadius + artworkMargin,
+      lessThanOrEqualTo(canvasRect.width),
+    );
+    expect(
+      geometry.center.dy + geometry.outerRadius + artworkMargin,
+      lessThanOrEqualTo(canvasRect.height),
+    );
     await _tapOrbitLane(tester, 4, 5);
     expect(find.byKey(const ValueKey('orbit-lane-4')), findsOneWidget);
     expect(tester.takeException(), isNull);

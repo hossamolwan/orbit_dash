@@ -257,11 +257,11 @@ class OrbitGeometry {
       center: Offset(size.width / 2, size.height / 2 + size.height * 0.035),
       radii: List<double>.unmodifiable(
         [
-          0.245,
-          0.34,
+          0.19,
+          0.255,
+          0.32,
           0.385,
-          0.43,
-          0.475,
+          0.45,
         ].take(orbitCount).map((fraction) => size.width * fraction).toList(),
       ),
     );
