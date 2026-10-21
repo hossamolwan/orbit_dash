@@ -348,11 +348,13 @@ class OrbitGamePage extends StatefulWidget {
     this.audioController,
     this.testDriver,
     this.dailyChallengesNow,
+    this.orbitUnlockNotificationDuration = const Duration(milliseconds: 2000),
   });
 
   final GameAudioController? audioController;
   final OrbitGameTestDriver? testDriver;
   final DateTime Function()? dailyChallengesNow;
+  final Duration orbitUnlockNotificationDuration;
 
   @override
   State<OrbitGamePage> createState() => _OrbitGamePageState();
@@ -369,6 +371,9 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   int _best = 0;
   int _orbitCount = 2;
   int _highestOrbitCount = 2;
+  String? _orbitUnlockMessage;
+  Timer? _orbitUnlockTimer;
+  int _orbitUnlockNotificationGeneration = 0;
   bool _newRecord = false;
   static const _survivalBestKey = 'orbit_dash_survival_best';
   final PlayerStatisticsStore _statisticsStore = PlayerStatisticsStore();
@@ -694,7 +699,11 @@ class _OrbitGamePageState extends State<OrbitGamePage>
       )) {
         _score++;
         _audio.playEffect(GameSoundEffect.gemCollect);
-        _orbitCount = survivalOrbitCountForScore(_score);
+        final updatedOrbitCount = survivalOrbitCountForScore(_score);
+        if (updatedOrbitCount > _orbitCount) {
+          _orbitCount = updatedOrbitCount;
+          _showOrbitUnlockNotification(updatedOrbitCount);
+        }
         _highestOrbitCount = math.max(_highestOrbitCount, _orbitCount);
         final placement = randomizedGemPlacement(
           orbitCount: _orbitCount,
@@ -739,9 +748,30 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     );
   }
 
+  void _showOrbitUnlockNotification(int orbitCount) {
+    _orbitUnlockTimer?.cancel();
+    final generation = ++_orbitUnlockNotificationGeneration;
+    _orbitUnlockMessage = 'ORBIT $orbitCount UNLOCKED';
+    _orbitUnlockTimer = Timer(widget.orbitUnlockNotificationDuration, () {
+      if (!mounted || generation != _orbitUnlockNotificationGeneration) return;
+      setState(() {
+        _orbitUnlockMessage = null;
+        _orbitUnlockTimer = null;
+      });
+    });
+  }
+
+  void _clearOrbitUnlockNotification() {
+    _orbitUnlockTimer?.cancel();
+    _orbitUnlockTimer = null;
+    _orbitUnlockNotificationGeneration++;
+    _orbitUnlockMessage = null;
+  }
+
   void _start() {
     if (_state == RunState.playing) return;
     setState(() {
+      _clearOrbitUnlockNotification();
       _orbitCount = 2;
       _highestOrbitCount = 2;
       _wallet.beginPickupSession();
@@ -1079,6 +1109,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _orbitUnlockTimer?.cancel();
     _ticker.dispose();
     _audio.removeListener(_audioSettingsChanged);
     unawaited(_audio.shutdown());
@@ -1093,6 +1124,9 @@ class _OrbitGamePageState extends State<OrbitGamePage>
           final compactWidth = constraints.maxWidth < 400;
           final compactHud =
               constraints.maxWidth < 360 || constraints.maxHeight < 600;
+          final highlightedOrbitLane = _orbitUnlockMessage == null
+              ? null
+              : _orbitCount - 1;
           final side = math.min(
             constraints.maxWidth,
             constraints.maxHeight * 0.87,
@@ -1254,25 +1288,31 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                             key: ValueKey(
                               'orbit-style-${_appearanceStore.selectedOrbit.name}-${_appearanceStore.selectedCore.name}',
                             ),
-                            child: CustomPaint(
-                              key: _shield.isActive
-                                  ? const ValueKey('shield-aura-visible')
-                                  : null,
-                              size: Size.square(side),
-                              painter: _OrbitPainter(
-                                angle: _angle,
-                                lane: _lane,
-                                orbitCount: _orbitCount,
-                                hazards: List.of(_hazards),
-                                gemAngle: _gemAngle,
-                                gemLane: _gemLane,
-                                shieldAngle: _shieldPickup?.angle,
-                                shieldLane: _shieldPickup?.lane,
-                                shieldActive: _shield.isActive,
-                                playerSkin: _skinStore.selectedSkin,
-                                trailSkin: _appearanceStore.selectedTrail,
-                                orbitSkin: _appearanceStore.selectedOrbit,
-                                coreSkin: _appearanceStore.selectedCore,
+                            child: KeyedSubtree(
+                              key: ValueKey(
+                                'orbit-painter-highlight-${highlightedOrbitLane ?? 'none'}',
+                              ),
+                              child: CustomPaint(
+                                key: _shield.isActive
+                                    ? const ValueKey('shield-aura-visible')
+                                    : null,
+                                size: Size.square(side),
+                                painter: _OrbitPainter(
+                                  angle: _angle,
+                                  lane: _lane,
+                                  orbitCount: _orbitCount,
+                                  highlightedOrbitLane: highlightedOrbitLane,
+                                  hazards: List.of(_hazards),
+                                  gemAngle: _gemAngle,
+                                  gemLane: _gemLane,
+                                  shieldAngle: _shieldPickup?.angle,
+                                  shieldLane: _shieldPickup?.lane,
+                                  shieldActive: _shield.isActive,
+                                  playerSkin: _skinStore.selectedSkin,
+                                  trailSkin: _appearanceStore.selectedTrail,
+                                  orbitSkin: _appearanceStore.selectedOrbit,
+                                  coreSkin: _appearanceStore.selectedCore,
+                                ),
                               ),
                             ),
                           ),
@@ -1287,20 +1327,45 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Text(
-                                  'SURVIVAL | ORBITS $_orbitCount | $_score GEMS',
-                                  key: const ValueKey('survival-status'),
-                                  style: TextStyle(
-                                    color: Color(0xffdce7f7),
-                                    letterSpacing: 0.8,
-                                    fontSize: compactHud ? 9 : 10,
-                                    fontWeight: FontWeight.bold,
-                                    shadows: [
-                                      Shadow(
-                                        color: Color(0xaa000000),
-                                        blurRadius: 4,
+                                Container(
+                                  key: const ValueKey(
+                                    'survival-status-container',
+                                  ),
+                                  height: 18,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                  ),
+                                  decoration: _orbitUnlockMessage == null
+                                      ? null
+                                      : BoxDecoration(
+                                          color: Color(0x9910192d),
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                          border: Border.all(
+                                            color: Color(0x5587eaff),
+                                          ),
+                                        ),
+                                  child: Center(
+                                    child: Text(
+                                      _orbitUnlockMessage ??
+                                          'SURVIVAL | ORBITS $_orbitCount | $_score GEMS',
+                                      key: const ValueKey('survival-status'),
+                                      maxLines: 1,
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        color: Color(0xffe9f8ff),
+                                        letterSpacing: 0.7,
+                                        fontSize: compactHud ? 10 : 11,
+                                        fontWeight: FontWeight.w800,
+                                        shadows: [
+                                          Shadow(
+                                            color: Color(0xaa000000),
+                                            blurRadius: 4,
+                                          ),
+                                        ],
                                       ),
-                                    ],
+                                    ),
                                   ),
                                 ),
                                 const SizedBox(height: 1),
@@ -2736,6 +2801,7 @@ class _OrbitPainter extends CustomPainter {
     required this.angle,
     required this.lane,
     required this.orbitCount,
+    this.highlightedOrbitLane,
     required this.hazards,
     required this.gemAngle,
     required this.gemLane,
@@ -2749,6 +2815,7 @@ class _OrbitPainter extends CustomPainter {
   });
   final double angle, gemAngle;
   final int lane, gemLane, orbitCount;
+  final int? highlightedOrbitLane;
   final List<_Hazard> hazards;
   final double? shieldAngle;
   final int? shieldLane;
@@ -2834,6 +2901,29 @@ class _OrbitPainter extends CustomPainter {
       } else if (orbitColors.pattern == OrbitPattern.plasma) {
         _drawPlasmaOrbit(canvas, center, r, orbitColors);
       }
+    }
+    final highlightLane = highlightedOrbitLane;
+    if (highlightLane != null &&
+        highlightLane >= 0 &&
+        highlightLane < geometry.radii.length) {
+      final highlightRadius = geometry.radiusForLane(highlightLane);
+      canvas.drawCircle(
+        center,
+        highlightRadius - 2,
+        Paint()
+          ..color = const Color(0xff55eaff).withValues(alpha: .72)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 6
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1),
+      );
+      canvas.drawCircle(
+        center,
+        highlightRadius,
+        Paint()
+          ..color = const Color(0xffc9fbff)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.4,
+      );
     }
     _orbitMarkers(canvas, center, geometry.radii);
     _planet(canvas, center, radius * (orbitCount == 2 ? .40 : .10));

@@ -400,6 +400,118 @@ void main() {
     restored.dispose();
   });
 
+  testWidgets('orbit unlock feedback follows each Survival threshold', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(320, 568);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({});
+    final driver = OrbitGameTestDriver();
+    await tester.pumpWidget(
+      _testApp(
+        testDriver: driver,
+        orbitUnlockNotificationDuration: const Duration(milliseconds: 2000),
+      ),
+    );
+    await tester.tap(find.text('START RUN'));
+    await tester.pump();
+
+    final statusFinder = find.byKey(const ValueKey('survival-status'));
+    final scoreFinder = find.byKey(const ValueKey('score'));
+    Future<void> collectThrough(int target) async {
+      while (driver.score < target) {
+        driver.placeGemAtPlayer();
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+    }
+
+    void expectCompactHud(
+      String expectedStatus,
+      int score, {
+      int? highlightLane,
+    }) {
+      final status = tester.widget<Text>(statusFinder);
+      final statusContainer = tester.widget<Container>(
+        find.byKey(const ValueKey('survival-status-container')),
+      );
+      final scoreText = tester.widget<Text>(scoreFinder);
+      final statusRect = tester.getRect(statusFinder);
+      final scoreRect = tester.getRect(scoreFinder);
+      final orbitRect = tester.getRect(
+        find.byKey(const ValueKey('orbit-lane-0')),
+      );
+
+      expect(status.data, expectedStatus);
+      expect(
+        statusContainer.decoration,
+        expectedStatus.startsWith('ORBIT ') ? isA<BoxDecoration>() : isNull,
+      );
+      expect(
+        find.byKey(
+          ValueKey('orbit-painter-highlight-${highlightLane ?? 'none'}'),
+        ),
+        findsOneWidget,
+      );
+      expect(statusRect.top, greaterThanOrEqualTo(0));
+      expect(statusRect.bottom, lessThanOrEqualTo(568));
+      expect(statusRect.bottom, lessThanOrEqualTo(scoreRect.top));
+      expect(scoreText.data, '$score');
+      expect(scoreRect.center.dx, closeTo(160, 0.1));
+      expect(scoreRect.bottom, lessThanOrEqualTo(orbitRect.top));
+      expect(scoreRect.bottom, lessThanOrEqualTo(568));
+    }
+
+    await collectThrough(10);
+    expect(driver.orbitCount, 3);
+    expectCompactHud('ORBIT 3 UNLOCKED', 10, highlightLane: 2);
+    final scoreTopDuringNotice = tester.getRect(scoreFinder).top;
+
+    await tester.pump(const Duration(milliseconds: 1700));
+    await collectThrough(11);
+    expect(driver.orbitCount, 3);
+    expectCompactHud('ORBIT 3 UNLOCKED', 11, highlightLane: 2);
+    await tester.pump(const Duration(milliseconds: 301));
+    expectCompactHud('SURVIVAL | ORBITS 3 | 11 GEMS', 11);
+    expect(
+      tester.getRect(scoreFinder).top,
+      closeTo(scoreTopDuringNotice, 0.01),
+    );
+
+    await collectThrough(25);
+    expect(driver.orbitCount, 4);
+    expectCompactHud('ORBIT 4 UNLOCKED', 25, highlightLane: 3);
+
+    await collectThrough(45);
+    expect(driver.orbitCount, 5);
+    expectCompactHud('ORBIT 5 UNLOCKED', 45, highlightLane: 4);
+    await tester.pump(const Duration(milliseconds: 1700));
+    expectCompactHud('ORBIT 5 UNLOCKED', 45, highlightLane: 4);
+    await tester.pump(const Duration(milliseconds: 301));
+    expectCompactHud('SURVIVAL | ORBITS 5 | 45 GEMS', 45);
+
+    await tester.tap(find.byTooltip('Pause'));
+    await tester.pump();
+    await tester.tap(find.text('RESTART RUN'));
+    await tester.pump();
+    expect(driver.score, 0);
+    expect(driver.orbitCount, 2);
+    await collectThrough(10);
+    expectCompactHud('ORBIT 3 UNLOCKED', 10, highlightLane: 2);
+    await tester.tap(find.byTooltip('Pause'));
+    await tester.pump();
+    await tester.tap(find.text('RESTART RUN'));
+    await tester.pump();
+    expect(driver.score, 0);
+    expect(driver.orbitCount, 2);
+    expectCompactHud('SURVIVAL | ORBITS 2 | 0 GEMS', 0);
+    await tester.pump(const Duration(milliseconds: 2000));
+    expectCompactHud('SURVIVAL | ORBITS 2 | 0 GEMS', 0);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 2000));
+    expect(tester.takeException(), isNull);
+  });
   testWidgets('a Survival run unlocks orbits and continues past 50 gems', (
     tester,
   ) async {
@@ -1132,10 +1244,14 @@ Future<OrbitGameTestDriver> _startShieldGame(WidgetTester tester) async {
   return driver;
 }
 
-Widget _testApp({OrbitGameTestDriver? testDriver}) => MaterialApp(
+Widget _testApp({
+  OrbitGameTestDriver? testDriver,
+  Duration orbitUnlockNotificationDuration = const Duration(milliseconds: 2000),
+}) => MaterialApp(
   home: OrbitGamePage(
     audioController: _TestAudioController(),
     testDriver: testDriver,
+    orbitUnlockNotificationDuration: orbitUnlockNotificationDuration,
   ),
 );
 
