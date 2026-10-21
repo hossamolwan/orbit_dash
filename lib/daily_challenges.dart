@@ -7,7 +7,7 @@ enum DailyChallengeEvent {
   gemCollected,
   runStarted,
   shieldAbsorbed,
-  stageCompleted,
+  orbitReached,
 }
 
 class DailyChallengeDefinition {
@@ -49,7 +49,7 @@ const dailyChallengePool = <DailyChallengeDefinition>[
   ),
   DailyChallengeDefinition(
     id: 'start_runs',
-    description: 'Start stage attempts.',
+    description: 'Start Survival runs.',
     event: DailyChallengeEvent.runStarted,
     goal: 2,
     gemReward: 5,
@@ -62,9 +62,9 @@ const dailyChallengePool = <DailyChallengeDefinition>[
     gemReward: 8,
   ),
   DailyChallengeDefinition(
-    id: 'complete_stages',
-    description: 'Complete stages.',
-    event: DailyChallengeEvent.stageCompleted,
+    id: 'reach_orbits',
+    description: 'Reach 3 orbits in a Survival run.',
+    event: DailyChallengeEvent.orbitReached,
     goal: 1,
     gemReward: 8,
   ),
@@ -264,6 +264,12 @@ class DailyChallengeStore {
       final result = <DailyChallenge>[];
       for (final challenge in selected) {
         final saved = values[challenge.definition.id];
+        // A challenge set can evolve while keeping the day's other entries.
+        // Missing IDs are new challenges and start with no progress.
+        if (saved == null) {
+          result.add(challenge);
+          continue;
+        }
         if (saved is! Map<String, dynamic> ||
             saved['progress'] is! int ||
             saved['claimed'] is! bool) {

@@ -8,6 +8,11 @@ enum AchievementId {
   savedByShield,
   orbitExplorer,
   orbitalMaster,
+  survivalOrbit3,
+  survivalOrbit4,
+  survivalOrbit5,
+  survivalRun10,
+  survivalRun25,
 }
 
 class AchievementDefinition {
@@ -43,14 +48,31 @@ const List<AchievementDefinition> achievementDefinitions = [
     description: 'Absorb an asteroid collision with your shield.',
   ),
   AchievementDefinition(
-    id: AchievementId.orbitExplorer,
+    id: AchievementId.survivalOrbit3,
     title: 'Orbit Explorer',
-    description: 'Unlock Stage 4.',
+    description: 'Reach 3 orbits in one Survival run.',
   ),
   AchievementDefinition(
-    id: AchievementId.orbitalMaster,
+    id: AchievementId.survivalOrbit5,
     title: 'Orbital Master',
-    description: 'Complete Stage 5 successfully.',
+    description: 'Reach 5 orbits in one Survival run.',
+  ),
+  AchievementDefinition(
+    id: AchievementId.survivalOrbit4,
+    title: 'Fourfold Orbit',
+    description: 'Reach 4 orbits in one Survival run.',
+  ),
+  AchievementDefinition(
+    id: AchievementId.survivalRun10,
+    title: 'Survivor',
+    description: 'Collect 10 gems in one Survival run.',
+    gemGoal: 10,
+  ),
+  AchievementDefinition(
+    id: AchievementId.survivalRun25,
+    title: 'Deep Space',
+    description: 'Collect 25 gems in one Survival run.',
+    gemGoal: 25,
   ),
 ];
 
@@ -66,6 +88,11 @@ class AchievementStore {
     AchievementId.savedByShield: 'orbit_dash_achievement_saved_by_shield',
     AchievementId.orbitExplorer: 'orbit_dash_achievement_orbit_explorer',
     AchievementId.orbitalMaster: 'orbit_dash_achievement_orbital_master',
+    AchievementId.survivalOrbit3: 'orbit_dash_achievement_survival_orbit_3',
+    AchievementId.survivalOrbit4: 'orbit_dash_achievement_survival_orbit_4',
+    AchievementId.survivalOrbit5: 'orbit_dash_achievement_survival_orbit_5',
+    AchievementId.survivalRun10: 'orbit_dash_achievement_survival_run_10',
+    AchievementId.survivalRun25: 'orbit_dash_achievement_survival_run_25',
   };
 
   static String preferenceKeyFor(AchievementId id) => _keys[id]!;
@@ -100,6 +127,25 @@ class AchievementStore {
     }
     return newlyUnlocked;
   });
+
+  Future<List<AchievementId>> recordRunProgress(int score, int orbits) =>
+      _serialize(() async {
+        final preferences = await _loadPreferences();
+        if (!_loaded) await _loadFrom(preferences);
+        final newlyUnlocked = <AchievementId>[];
+        for (final entry in [
+          (AchievementId.survivalOrbit3, 3, orbits),
+          (AchievementId.survivalOrbit4, 4, orbits),
+          (AchievementId.survivalOrbit5, 5, orbits),
+          (AchievementId.survivalRun10, 10, score),
+          (AchievementId.survivalRun25, 25, score),
+        ]) {
+          if (entry.$3 >= entry.$2) {
+            await _unlock(entry.$1, preferences, newlyUnlocked);
+          }
+        }
+        return newlyUnlocked;
+      });
 
   Future<List<AchievementId>> unlock(AchievementId id) => _serialize(() async {
     final preferences = await _loadPreferences();

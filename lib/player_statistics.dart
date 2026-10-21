@@ -7,15 +7,21 @@ class PlayerStatisticsStore {
     : _loadPreferences = loadPreferences ?? SharedPreferences.getInstance;
 
   static const runsStartedKey = 'orbit_dash_stats_runs_started_v1';
+
+  /// Legacy campaign history retained so existing saves remain readable.
   static const completedStagesKey = 'orbit_dash_stats_completed_stages_v1';
   static const shieldAbsorptionsKey = 'orbit_dash_stats_shield_absorptions_v1';
   static const lossesKey = 'orbit_dash_stats_losses_v1';
+  static const bestRunKey = 'orbit_dash_stats_best_survival_run_v1';
+  static const maxOrbitKey = 'orbit_dash_stats_max_orbit_v1';
 
   final Future<SharedPreferences> Function() _loadPreferences;
   final Set<int> _completedStages = {};
   int _runsStarted = 0;
   int _shieldAbsorptions = 0;
   int _losses = 0;
+  int _bestRun = 0;
+  int _maxOrbit = 2;
   bool _loaded = false;
   Future<void> _tail = Future<void>.value();
 
@@ -23,30 +29,35 @@ class PlayerStatisticsStore {
   int get distinctStagesCompleted => _completedStages.length;
   int get shieldAbsorptions => _shieldAbsorptions;
   int get losses => _losses;
+  int get bestRun => _bestRun;
+  int get maxOrbit => _maxOrbit;
   Set<int> get completedStages => Set.unmodifiable(_completedStages);
   bool get isLoaded => _loaded;
 
   Future<void> flush() => _tail;
 
-  Future<void> load({required int highestUnlockedStage}) =>
-      _serialize(() async {
-        final preferences = await _loadPreferences();
-        _runsStarted = _readCounter(preferences, runsStartedKey);
-        _shieldAbsorptions = _readCounter(preferences, shieldAbsorptionsKey);
-        _losses = _readCounter(preferences, lossesKey);
-        _completedStages
-          ..clear()
-          ..addAll(_readCompletedStages(preferences));
-        // Unlocking stage N only follows completion of stages before N.
-        for (var stage = 1; stage < highestUnlockedStage; stage++) {
-          if (stage <= 5) _completedStages.add(stage);
-        }
-        _loaded = true;
-        await preferences.setStringList(
-          completedStagesKey,
-          _completedStages.map((stage) => '$stage').toList()..sort(),
-        );
-      });
+  /// Loads Survival statistics and retains the saved campaign history.
+  /// [highestUnlockedStage] remains optional for legacy callers only.
+  Future<void> load({int? highestUnlockedStage}) => _serialize(() async {
+    final preferences = await _loadPreferences();
+    _runsStarted = _readCounter(preferences, runsStartedKey);
+    _shieldAbsorptions = _readCounter(preferences, shieldAbsorptionsKey);
+    _losses = _readCounter(preferences, lossesKey);
+    _bestRun = _readCounter(preferences, bestRunKey);
+    _maxOrbit = _readCounter(preferences, maxOrbitKey).clamp(2, 5);
+    _completedStages
+      ..clear()
+      ..addAll(_readCompletedStages(preferences));
+    // Unlocking stage N only follows completion of stages before N.
+    for (var stage = 1; stage < (highestUnlockedStage ?? 1); stage++) {
+      if (stage <= 5) _completedStages.add(stage);
+    }
+    _loaded = true;
+    await preferences.setStringList(
+      completedStagesKey,
+      _completedStages.map((stage) => '$stage').toList()..sort(),
+    );
+  });
 
   Future<void> recordRunStarted() =>
       _increment(runsStartedKey, () => _runsStarted++);
@@ -56,6 +67,17 @@ class PlayerStatisticsStore {
 
   Future<void> recordLoss() => _increment(lossesKey, () => _losses++);
 
+  Future<void> recordSurvivalRun(int score, int maxOrbit) =>
+      _serialize(() async {
+        final preferences = await _loadPreferences();
+        if (!_loaded) await _loadFrom(preferences);
+        if (score > _bestRun) _bestRun = score;
+        if (maxOrbit > _maxOrbit) _maxOrbit = maxOrbit.clamp(2, 5);
+        await preferences.setInt(bestRunKey, _bestRun);
+        await preferences.setInt(maxOrbitKey, _maxOrbit);
+      });
+
+  /// Writes legacy campaign history without affecting Survival progression.
   Future<void> recordStageCompleted(int stage) => _serialize(() async {
     if (stage < 1 || stage > 5) return;
     final preferences = await _loadPreferences();
@@ -84,6 +106,8 @@ class PlayerStatisticsStore {
     _runsStarted = _readCounter(preferences, runsStartedKey);
     _shieldAbsorptions = _readCounter(preferences, shieldAbsorptionsKey);
     _losses = _readCounter(preferences, lossesKey);
+    _bestRun = _readCounter(preferences, bestRunKey);
+    _maxOrbit = _readCounter(preferences, maxOrbitKey).clamp(2, 5);
     _completedStages
       ..clear()
       ..addAll(_readCompletedStages(preferences));

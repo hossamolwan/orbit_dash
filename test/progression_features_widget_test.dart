@@ -130,14 +130,6 @@ void main() {
         home: OrbitGamePage(
           audioController: _FeatureTestAudio(),
           testDriver: driver,
-          stages: const [
-            StageDefinition(
-              number: 1,
-              name: 'Statistics Test',
-              targetScore: 50,
-              orbitCount: 2,
-            ),
-          ],
         ),
       ),
     );
@@ -171,7 +163,7 @@ void main() {
     await driver.flushProgress();
     expect(driver.losses, 1);
 
-    await tester.tap(find.text('RETRY STAGE'));
+    await tester.tap(find.text('RETRY RUN'));
     await tester.pump();
     await driver.flushProgress();
     expect(driver.runsStarted, 2);
@@ -189,90 +181,6 @@ void main() {
     expect(find.text('LOSSES'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
   });
-
-  testWidgets(
-    'stage completion history stays distinct without granting shop skins',
-    (tester) async {
-      const stages = [
-        StageDefinition(number: 1, name: 'One', targetScore: 1, orbitCount: 2),
-        StageDefinition(number: 2, name: 'Two', targetScore: 1, orbitCount: 3),
-        StageDefinition(
-          number: 3,
-          name: 'Three',
-          targetScore: 1,
-          orbitCount: 4,
-        ),
-        StageDefinition(number: 4, name: 'Four', targetScore: 1, orbitCount: 5),
-        StageDefinition(number: 5, name: 'Five', targetScore: 1, orbitCount: 5),
-      ];
-      final driver = OrbitGameTestDriver();
-      await tester.pumpWidget(
-        MaterialApp(
-          home: OrbitGamePage(
-            audioController: _FeatureTestAudio(),
-            stages: stages,
-            testDriver: driver,
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      await driver.flushProgress();
-      await tester.tap(find.text('START RUN'));
-      await tester.pump();
-
-      for (var stage = 1; stage <= 5; stage++) {
-        if (stage > 1) {
-          await tester.tap(find.text('CONTINUE TO STAGE $stage'));
-          await tester.pump();
-          await tester.pump();
-        }
-        await _completeStage(tester, stages[stage - 1].orbitCount);
-        await driver.flushProgress();
-        expect(driver.runsStarted, stage);
-        expect(driver.distinctStagesCompleted, stage);
-        if (stage == 3) expect(driver.skinUnlocked(ShipSkinId.solar), isFalse);
-        if (stage < 5) {
-          expect(find.text('STAGE COMPLETE'), findsOneWidget);
-        }
-      }
-      expect(find.text('GAME COMPLETE'), findsOneWidget);
-      expect(driver.skinUnlocked(ShipSkinId.supernova), isFalse);
-      await driver.flushProgress();
-      expect(driver.distinctStagesCompleted, 5);
-      await tester.pumpWidget(const SizedBox.shrink());
-    },
-  );
-}
-
-Future<void> _completeStage(WidgetTester tester, int orbitCount) async {
-  if (orbitCount > 2) await _tapLane(tester, orbitCount - 1, orbitCount);
-  await _tapLane(tester, 1, orbitCount);
-  for (var frame = 0; frame < 45; frame++) {
-    await tester.pump(const Duration(milliseconds: 50));
-    if (find.text('STAGE COMPLETE').evaluate().isNotEmpty ||
-        find.text('GAME COMPLETE').evaluate().isNotEmpty) {
-      return;
-    }
-  }
-  fail('Stage did not complete within the expected gameplay frames.');
-}
-
-Future<void> _tapLane(WidgetTester tester, int lane, int orbitCount) async {
-  final currentLaneNumber = List<int>.generate(orbitCount, (i) => i).firstWhere(
-    (lane) =>
-        find.byKey(ValueKey<String>('orbit-lane-$lane')).evaluate().isNotEmpty,
-  );
-  final rect = tester.getRect(
-    find.byKey(ValueKey<String>('orbit-lane-$currentLaneNumber')),
-  );
-  final geometry = OrbitGeometry.forSizeAndCount(
-    rect.size,
-    orbitCount: orbitCount,
-  );
-  await tester.tapAt(
-    rect.topLeft + geometry.center + Offset(geometry.radiusForLane(lane), 0),
-  );
-  await tester.pump();
 }
 
 class _FeatureTestAudio extends GameAudioController {

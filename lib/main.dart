@@ -32,12 +32,9 @@ class OrbitDashApp extends StatelessWidget {
 
 enum RunState {
   ready,
-  selectingStage,
   playing,
   paused,
   over,
-  stageComplete,
-  gameComplete,
   achievements,
   skins,
   statistics,
@@ -60,13 +57,13 @@ class OrbitGameTestDriver {
   late Duration Function() _readShieldRemaining;
   late int Function() _readHazardCount;
   late int Function() _readScore;
+  late int Function() _readOrbitCount;
   late RunState Function() _readRunState;
   late int Function() _readTotalGems;
   late int Function() _readWalletBalance;
   late bool Function(AchievementId id) _readAchievementUnlocked;
   late Future<void> Function() _flushAchievements;
   late int Function() _readRunsStarted;
-  late int Function() _readDistinctStagesCompleted;
   late int Function() _readShieldAbsorptions;
   late int Function() _readLosses;
   late ShipSkinId Function() _readSelectedSkin;
@@ -81,13 +78,13 @@ class OrbitGameTestDriver {
   Duration get shieldRemaining => _readShieldRemaining();
   int get hazardCount => _readHazardCount();
   int get score => _readScore();
+  int get orbitCount => _readOrbitCount();
   RunState get runState => _readRunState();
   int get totalGems => _readTotalGems();
   int get walletBalance => _readWalletBalance();
   bool achievementUnlocked(AchievementId id) => _readAchievementUnlocked(id);
   Future<void> flushAchievements() => _flushAchievements();
   int get runsStarted => _readRunsStarted();
-  int get distinctStagesCompleted => _readDistinctStagesCompleted();
   int get shieldAbsorptions => _readShieldAbsorptions();
   int get losses => _readLosses();
   ShipSkinId get selectedSkin => _readSelectedSkin();
@@ -113,13 +110,13 @@ class OrbitGameTestDriver {
     required Duration Function() readShieldRemaining,
     required int Function() readHazardCount,
     required int Function() readScore,
+    required int Function() readOrbitCount,
     required RunState Function() readRunState,
     required int Function() readTotalGems,
     required int Function() readWalletBalance,
     required bool Function(AchievementId id) readAchievementUnlocked,
     required Future<void> Function() flushAchievements,
     required int Function() readRunsStarted,
-    required int Function() readDistinctStagesCompleted,
     required int Function() readShieldAbsorptions,
     required int Function() readLosses,
     required ShipSkinId Function() readSelectedSkin,
@@ -138,13 +135,13 @@ class OrbitGameTestDriver {
     _readShieldRemaining = readShieldRemaining;
     _readHazardCount = readHazardCount;
     _readScore = readScore;
+    _readOrbitCount = readOrbitCount;
     _readRunState = readRunState;
     _readTotalGems = readTotalGems;
     _readWalletBalance = readWalletBalance;
     _readAchievementUnlocked = readAchievementUnlocked;
     _flushAchievements = flushAchievements;
     _readRunsStarted = readRunsStarted;
-    _readDistinctStagesCompleted = readDistinctStagesCompleted;
     _readShieldAbsorptions = readShieldAbsorptions;
     _readLosses = readLosses;
     _readSelectedSkin = readSelectedSkin;
@@ -154,94 +151,6 @@ class OrbitGameTestDriver {
     _readSkinUnlocked = readSkinUnlocked;
     _flushProgress = flushProgress;
     _enqueueFeatureWrite = enqueueFeatureWrite;
-  }
-}
-
-class StageDefinition {
-  const StageDefinition({
-    required this.number,
-    required this.name,
-    required this.targetScore,
-    required this.orbitCount,
-  });
-
-  final int number;
-  final String name;
-  final int targetScore;
-  final int orbitCount;
-}
-
-const List<StageDefinition> orbitStages = [
-  StageDefinition(
-    number: 1,
-    name: 'First Orbit',
-    targetScore: 10,
-    orbitCount: 2,
-  ),
-  StageDefinition(
-    number: 2,
-    name: 'Gem Hunter',
-    targetScore: 15,
-    orbitCount: 3,
-  ),
-  StageDefinition(
-    number: 3,
-    name: 'Asteroid Rush',
-    targetScore: 25,
-    orbitCount: 4,
-  ),
-  StageDefinition(
-    number: 4,
-    name: 'Cosmic Trial',
-    targetScore: 35,
-    orbitCount: 5,
-  ),
-  StageDefinition(
-    number: 5,
-    name: 'Orbital Master',
-    targetScore: 50,
-    orbitCount: 5,
-  ),
-];
-
-class StageCompletionGate {
-  bool _completed = false;
-
-  bool completeIfReached(int score, StageDefinition stage) {
-    if (_completed || score < stage.targetScore) return false;
-    _completed = true;
-    return true;
-  }
-
-  void reset() => _completed = false;
-}
-
-class StageProgressStore {
-  static const preferenceKey = 'orbit_dash_unlocked_stage';
-
-  Future<int> loadUnlockedStage() async {
-    final preferences = await SharedPreferences.getInstance();
-    return _storedStage(preferences);
-  }
-
-  Future<void> unlockThrough(int stageNumber) async {
-    final preferences = await SharedPreferences.getInstance();
-    final current = _storedStage(preferences);
-    final requested = _validStage(stageNumber);
-    if (requested > current) {
-      await preferences.setInt(preferenceKey, requested);
-    }
-  }
-
-  int _validStage(int? value) =>
-      value == null || value < 1 || value > orbitStages.length ? 1 : value;
-
-  int _storedStage(SharedPreferences preferences) {
-    try {
-      return _validStage(preferences.getInt(preferenceKey));
-    } on TypeError {
-      return 1;
-    }
   }
 }
 
@@ -344,19 +253,16 @@ class OrbitGeometry {
 
   factory OrbitGeometry.forSizeAndCount(Size size, {required int orbitCount}) {
     assert(orbitCount >= 2 && orbitCount <= 5);
-    final outerRadius = size.width * (orbitCount == 2 ? 0.34 : 0.43);
-    final innerRadius = orbitCount == 2
-        ? outerRadius * 0.72
-        : outerRadius * 0.18;
     return OrbitGeometry(
       center: Offset(size.width / 2, size.height / 2 + size.height * 0.035),
       radii: List<double>.unmodifiable(
-        List<double>.generate(
-          orbitCount,
-          (index) =>
-              innerRadius +
-              (outerRadius - innerRadius) * index / (orbitCount - 1),
-        ),
+        [
+          0.245,
+          0.34,
+          0.385,
+          0.43,
+          0.475,
+        ].take(orbitCount).map((fraction) => size.width * fraction).toList(),
       ),
     );
   }
@@ -365,9 +271,13 @@ class OrbitGeometry {
   final List<double> radii;
   double get innerRadius => radii.first;
   double get outerRadius => radii.last;
-  double get touchTolerance => radii.length == 2
-      ? math.min(18.0, (outerRadius - innerRadius) / 2)
-      : math.min(18.0, (outerRadius - innerRadius) / (radii.length - 1) / 2);
+  double get touchTolerance {
+    var minimumGap = double.infinity;
+    for (var lane = 1; lane < radii.length; lane++) {
+      minimumGap = math.min(minimumGap, radii[lane] - radii[lane - 1]);
+    }
+    return math.min(18.0, minimumGap / 2);
+  }
 
   double radiusForLane(int lane) => radii[lane];
 
@@ -403,22 +313,44 @@ int laneAfterOrbitTouch(
 bool hazardLifetimeExpired(double relativeAngleTravel) =>
     relativeAngleTravel >= _fullTurn;
 
-double playerSpeedForScore(int score) => 1.55 + math.min(score * 0.035, 1.5);
+const double maxSurvivalPlayerSpeed = 2.75;
+const double minSurvivalHazardInterval = 0.95;
+double playerSpeedForScore(int score) =>
+    1.55 +
+    math.min(
+      1.2 * (1 - math.exp(-math.max(0, score) / 120)),
+      maxSurvivalPlayerSpeed - 1.55,
+    );
 
 double hazardSpawnIntervalForScore(int score) =>
-    math.max(0.85, 2.0 - score * 0.025);
+    math.max(minSurvivalHazardInterval, 2.0 - math.max(0, score) * 0.0035);
+
+const List<int> survivalOrbitThresholds = [10, 25, 45];
+int survivalOrbitCountForScore(int score) =>
+    2 + survivalOrbitThresholds.where((threshold) => score >= threshold).length;
+
+({int lane, double angle}) randomizedGemPlacement({
+  required int orbitCount,
+  required math.Random random,
+  double? avoidAngle,
+}) {
+  final lane = random.nextInt(orbitCount);
+  var angle = random.nextDouble() * _fullTurn;
+  if (avoidAngle != null && shortestAngularDistance(angle, avoidAngle) < 0.65) {
+    angle = (angle + math.pi) % _fullTurn;
+  }
+  return (lane: lane, angle: angle);
+}
 
 class OrbitGamePage extends StatefulWidget {
   const OrbitGamePage({
     super.key,
     this.audioController,
-    this.stages = orbitStages,
     this.testDriver,
     this.dailyChallengesNow,
-  }) : assert(stages.length >= 1 && stages.length <= 5);
+  });
 
   final GameAudioController? audioController;
-  final List<StageDefinition> stages;
   final OrbitGameTestDriver? testDriver;
   final DateTime Function()? dailyChallengesNow;
 
@@ -435,10 +367,10 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   RunState _state = RunState.ready;
   int _score = 0;
   int _best = 0;
-  int _currentStageIndex = 0;
-  int _highestUnlockedStage = 1;
-  bool _stageProgressLoaded = false;
-  final StageProgressStore _stageProgressStore = StageProgressStore();
+  int _orbitCount = 2;
+  int _highestOrbitCount = 2;
+  bool _newRecord = false;
+  static const _survivalBestKey = 'orbit_dash_survival_best';
   final PlayerStatisticsStore _statisticsStore = PlayerStatisticsStore();
   final SkinStore _skinStore = SkinStore();
   final AppearanceStore _appearanceStore = AppearanceStore();
@@ -462,9 +394,6 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   bool _achievementsLoaded = false;
   bool _achievementsLoadFailed = false;
   bool _achievementsLoading = false;
-  Future<void> _progressWrite = Future<void>.value();
-  final StageCompletionGate _completionGate = StageCompletionGate();
-  bool _completionHandled = false;
   int _lane = 0;
   double _angle = -math.pi / 2;
   double _gemAngle = 0.7;
@@ -476,8 +405,6 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   _ShieldPickup? _shieldPickup;
   double _shieldSpawnClock = 0;
   double _nextShieldSpawnAt = 12;
-
-  StageDefinition get _currentStage => widget.stages[_currentStageIndex];
 
   @override
   void initState() {
@@ -504,21 +431,20 @@ class _OrbitGamePageState extends State<OrbitGamePage>
         _gemLane = _lane;
       }),
       moveGemAwayFromPlayer: () => setState(() {
-        _gemLane = (_lane + 1) % _currentStage.orbitCount;
+        _gemLane = (_lane + 1) % _orbitCount;
         _gemAngle = _angle;
       }),
       readShieldActive: () => _shield.isActive,
       readShieldRemaining: () => _shield.remaining,
       readHazardCount: () => _hazards.length,
       readScore: () => _score,
+      readOrbitCount: () => _orbitCount,
       readRunState: () => _state,
       readTotalGems: () => _achievementStore.totalGems,
       readWalletBalance: () => _wallet.balance,
       readAchievementUnlocked: _achievementStore.isUnlocked,
       flushAchievements: _flushAchievements,
       readRunsStarted: () => _statisticsStore.runsStarted,
-      readDistinctStagesCompleted: () =>
-          _statisticsStore.distinctStagesCompleted,
       readShieldAbsorptions: () => _statisticsStore.shieldAbsorptions,
       readLosses: () => _statisticsStore.losses,
       readSelectedSkin: () => _skinStore.selectedSkin,
@@ -533,20 +459,19 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     _featureStoresReady = _loadFeatureStores();
     unawaited(_featureStoresReady);
     SharedPreferences.getInstance().then((prefs) {
-      if (mounted) setState(() => _best = prefs.getInt('orbit_dash_best') ?? 0);
+      if (mounted) setState(() => _best = prefs.getInt(_survivalBestKey) ?? 0);
     });
   }
 
   Future<void> _loadFeatureStores() async {
     await _loadDailyChallenges();
     await _loadAchievements();
-    await _loadStageProgress();
     try {
       await _wallet.load();
       if (!_achievementsLoaded) {
         throw StateError('Lifetime gem progress is unavailable.');
       }
-      await _statisticsStore.load(highestUnlockedStage: _highestUnlockedStage);
+      await _statisticsStore.load();
       await _skinStore.load(ownedItemIds: _wallet.purchasedItemIds);
       await _appearanceStore.load(ownedItemIds: _wallet.purchasedItemIds);
       if (mounted) {
@@ -600,23 +525,6 @@ class _OrbitGamePageState extends State<OrbitGamePage>
           debugPrint('Queued feature write failed: $error');
           _featureWriteFailures.add(_FeatureWriteFailure(error, stackTrace));
         });
-  }
-
-  Future<void> _loadStageProgress() async {
-    final loadedStage = await _stageProgressStore.loadUnlockedStage();
-    if (!mounted) return;
-    setState(() {
-      _highestUnlockedStage = math
-          .max(_highestUnlockedStage, loadedStage)
-          .toInt();
-      _stageProgressLoaded = true;
-    });
-    if (loadedStage >= 4) {
-      _queueAchievementUpdate(
-        _achievementStore.unlock(AchievementId.orbitExplorer),
-        notify: false,
-      );
-    }
   }
 
   Future<void> _loadAchievements() async {
@@ -723,7 +631,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
         _hazards.add(
           _Hazard(
             (_angle + math.pi + 0.4) % (math.pi * 2),
-            hazardLaneForScore(_score, _lane, _currentStage.orbitCount),
+            hazardLaneForScore(_score, _lane, _orbitCount),
           ),
         );
       }
@@ -786,8 +694,15 @@ class _OrbitGamePageState extends State<OrbitGamePage>
       )) {
         _score++;
         _audio.playEffect(GameSoundEffect.gemCollect);
-        _gemAngle = (_angle + 2.4 + (_score % 3) * 0.45) % (math.pi * 2);
-        _gemLane = nextOrbitLane(_gemLane, _currentStage.orbitCount);
+        _orbitCount = survivalOrbitCountForScore(_score);
+        _highestOrbitCount = math.max(_highestOrbitCount, _orbitCount);
+        final placement = randomizedGemPlacement(
+          orbitCount: _orbitCount,
+          random: _random,
+          avoidAngle: _angle,
+        );
+        _gemAngle = placement.angle;
+        _gemLane = placement.lane;
         _queueAchievementUpdate(_recordGemProgress());
         final pickupId = 'pickup:$_runToken:${++_pickupSequence}';
         _queueFeatureWrite(() async {
@@ -796,9 +711,13 @@ class _OrbitGamePageState extends State<OrbitGamePage>
         _queueFeatureWrite(
           () => _recordDailyChallengeEvent(DailyChallengeEvent.gemCollected),
         );
-        if (_completionGate.completeIfReached(_score, _currentStage)) {
-          _completeStage();
-          return;
+        _queueAchievementUpdate(
+          _achievementStore.recordRunProgress(_score, _highestOrbitCount),
+        );
+        if (_score == 10) {
+          _queueFeatureWrite(
+            () => _recordDailyChallengeEvent(DailyChallengeEvent.orbitReached),
+          );
         }
       }
     });
@@ -816,20 +735,15 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     _nextShieldSpawnAt = 12 + _random.nextDouble() * 8;
     _shieldPickup = _ShieldPickup(
       (_angle + 0.4 + _random.nextDouble() * 1.4) % _fullTurn,
-      _random.nextInt(_currentStage.orbitCount),
+      _random.nextInt(_orbitCount),
     );
   }
 
-  void _start({int? stageIndex}) {
+  void _start() {
     if (_state == RunState.playing) return;
-    final requestedStage = stageIndex ?? _currentStageIndex;
-    if (requestedStage < 0 ||
-        requestedStage >= widget.stages.length ||
-        requestedStage + 1 > _highestUnlockedStage) {
-      return;
-    }
     setState(() {
-      _currentStageIndex = requestedStage;
+      _orbitCount = 2;
+      _highestOrbitCount = 2;
       _wallet.beginPickupSession();
       _runToken = DateTime.now().microsecondsSinceEpoch;
       _pickupSequence = 0;
@@ -842,10 +756,14 @@ class _OrbitGamePageState extends State<OrbitGamePage>
       _shieldPickup = null;
       _shieldSpawnClock = 0;
       _nextShieldSpawnAt = 12 + _random.nextDouble() * 8;
-      _gemAngle = 0.7;
-      _gemLane = nextOrbitLane(0, _currentStage.orbitCount);
-      _completionGate.reset();
-      _completionHandled = false;
+      final placement = randomizedGemPlacement(
+        orbitCount: _orbitCount,
+        random: _random,
+        avoidAngle: _angle,
+      );
+      _gemAngle = placement.angle;
+      _gemLane = placement.lane;
+      _newRecord = false;
       _state = RunState.playing;
       _lastTick = Duration.zero;
     });
@@ -867,55 +785,19 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     _audio.setGameState(AudioRunState.over);
     _audio.playEffect(GameSoundEffect.collision);
     _saveBestScore();
-    _queueFeatureWrite(_recordLoss);
-  }
-
-  void _completeStage() {
-    if (_state != RunState.playing || _completionHandled) return;
-    _completionHandled = true;
-    _shield.reset();
-    _shieldPickup = null;
-    _state = _currentStageIndex == widget.stages.length - 1
-        ? RunState.gameComplete
-        : RunState.stageComplete;
-    _ticker.stop();
-    _audio.setGameState(AudioRunState.over);
-    _saveBestScore();
-    _queueFeatureWrite(() => _recordStageCompletion(_currentStage.number));
     _queueFeatureWrite(
-      () => _recordDailyChallengeEvent(DailyChallengeEvent.stageCompleted),
+      () => _statisticsStore.recordSurvivalRun(_score, _highestOrbitCount),
     );
-    final nextStage = _currentStageIndex + 1 < widget.stages.length
-        ? widget.stages[_currentStageIndex + 1].number
-        : null;
-    if (nextStage != null && nextStage > _highestUnlockedStage) {
-      _highestUnlockedStage = nextStage;
-      _progressWrite = _progressWrite.then(
-        (_) => _stageProgressStore.unlockThrough(_highestUnlockedStage),
-      );
-      _progressWrite = _progressWrite.catchError((Object error) {
-        debugPrint('Failed to save stage progress: $error');
-      });
-      unawaited(_progressWrite);
-      if (nextStage == 4) {
-        _queueAchievementUpdate(
-          _achievementStore.unlock(AchievementId.orbitExplorer),
-        );
-      }
-    }
-    if (_currentStage.number == 5 && _state == RunState.gameComplete) {
-      _queueAchievementUpdate(
-        _achievementStore.unlock(AchievementId.orbitalMaster),
-      );
-    }
+    _queueFeatureWrite(_recordLoss);
   }
 
   void _saveBestScore() {
     if (_score <= _best) return;
     _best = _score;
+    _newRecord = true;
     unawaited(
       SharedPreferences.getInstance().then(
-        (prefs) => prefs.setInt('orbit_dash_best', _best),
+        (prefs) => prefs.setInt(_survivalBestKey, _best),
       ),
     );
   }
@@ -952,15 +834,6 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     }
   }
 
-  Future<void> _recordStageCompletion(int stage) async {
-    try {
-      await _statisticsStore.recordStageCompleted(stage);
-      if (mounted) setState(() {});
-    } catch (error) {
-      debugPrint('Failed to save stage completion statistic: $error');
-    }
-  }
-
   Future<void> _recordDailyChallengeEvent(DailyChallengeEvent event) async {
     try {
       await _dailyChallengeStore.recordEvent(event);
@@ -968,28 +841,6 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     } catch (error) {
       debugPrint('Failed to save daily challenge progress: $error');
     }
-  }
-
-  Future<void> _continueToNextStage() async {
-    if (_state != RunState.stageComplete ||
-        _currentStageIndex >= widget.stages.length - 1) {
-      return;
-    }
-    await _progressWrite;
-    if (!mounted) return;
-    _start(stageIndex: _currentStageIndex + 1);
-  }
-
-  Future<void> _selectStage(int stageIndex) async {
-    if (stageIndex < 0 ||
-        stageIndex >= widget.stages.length ||
-        stageIndex + 1 > _highestUnlockedStage ||
-        (!_stageProgressLoaded && stageIndex > 0)) {
-      return;
-    }
-    await _progressWrite;
-    if (!mounted) return;
-    _start(stageIndex: stageIndex);
   }
 
   void _pause({bool playEffect = true}) {
@@ -1016,11 +867,6 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     _shieldSpawnClock = 0;
     _lastTick = Duration.zero;
     setState(() => _state = RunState.ready);
-    _audio.setGameState(AudioRunState.menu);
-  }
-
-  void _openStageSelection() {
-    setState(() => _state = RunState.selectingStage);
     _audio.setGameState(AudioRunState.menu);
   }
 
@@ -1201,10 +1047,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
           _orbitCanvasKey.currentContext!.findRenderObject()! as RenderBox;
       final selectedLane = laneAfterOrbitTouch(
         _lane,
-        OrbitGeometry.forSizeAndCount(
-          canvas.size,
-          orbitCount: _currentStage.orbitCount,
-        ),
+        OrbitGeometry.forSizeAndCount(canvas.size, orbitCount: _orbitCount),
         canvas.globalToLocal(globalPosition),
       );
       if (selectedLane == _lane) return;
@@ -1216,16 +1059,13 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   AudioRunState _audioStateFor(RunState state) => switch (state) {
     // The ready overlay is the app's actual start/menu screen.
     RunState.ready ||
-    RunState.selectingStage ||
     RunState.achievements ||
     RunState.skins ||
     RunState.statistics ||
     RunState.dailyChallenges => AudioRunState.menu,
     RunState.playing => AudioRunState.playing,
     RunState.paused => AudioRunState.paused,
-    RunState.over ||
-    RunState.stageComplete ||
-    RunState.gameComplete => AudioRunState.over,
+    RunState.over => AudioRunState.over,
   };
 
   void _toggleMusic() {
@@ -1251,6 +1091,8 @@ class _OrbitGamePageState extends State<OrbitGamePage>
       child: LayoutBuilder(
         builder: (context, constraints) {
           final compactWidth = constraints.maxWidth < 400;
+          final compactHud =
+              constraints.maxWidth < 360 || constraints.maxHeight < 600;
           final side = math.min(
             constraints.maxWidth,
             constraints.maxHeight * 0.87,
@@ -1420,7 +1262,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                               painter: _OrbitPainter(
                                 angle: _angle,
                                 lane: _lane,
-                                orbitCount: _currentStage.orbitCount,
+                                orbitCount: _orbitCount,
                                 hazards: List.of(_hazards),
                                 gemAngle: _gemAngle,
                                 gemLane: _gemLane,
@@ -1438,7 +1280,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                       ),
                       if (_state == RunState.playing)
                         Positioned(
-                          top: 0,
+                          top: 2,
                           left: 0,
                           right: 0,
                           child: IgnorePointer(
@@ -1446,20 +1288,27 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Text(
-                                  'STAGE ${_currentStage.number} Â· $_score/${_currentStage.targetScore}',
-                                  key: const ValueKey('current-stage'),
-                                  style: const TextStyle(
-                                    color: Colors.white54,
-                                    letterSpacing: 1.2,
-                                    fontSize: 10,
+                                  'SURVIVAL | ORBITS $_orbitCount | $_score GEMS',
+                                  key: const ValueKey('survival-status'),
+                                  style: TextStyle(
+                                    color: Color(0xffdce7f7),
+                                    letterSpacing: 0.8,
+                                    fontSize: compactHud ? 9 : 10,
                                     fontWeight: FontWeight.bold,
+                                    shadows: [
+                                      Shadow(
+                                        color: Color(0xaa000000),
+                                        blurRadius: 4,
+                                      ),
+                                    ],
                                   ),
                                 ),
+                                const SizedBox(height: 1),
                                 Text(
                                   '$_score',
                                   key: const ValueKey('score'),
-                                  style: const TextStyle(
-                                    fontSize: 48,
+                                  style: TextStyle(
+                                    fontSize: compactHud ? 42 : 48,
                                     fontWeight: FontWeight.w300,
                                     color: Colors.white,
                                     height: 1.12,
@@ -1586,12 +1435,6 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     required bool compact,
     required bool showAudioControls,
   }) {
-    if (_state == RunState.selectingStage) {
-      return _stageSelectionContent(
-        compact: compact,
-        showAudioControls: showAudioControls,
-      );
-    }
     if (_state == RunState.achievements) {
       return _achievementContent(
         compact: compact,
@@ -1617,30 +1460,22 @@ class _OrbitGamePageState extends State<OrbitGamePage>
       );
     }
 
-    final stage = _currentStage;
     final lost = _state == RunState.over;
-    final stageComplete = _state == RunState.stageComplete;
-    final gameComplete = _state == RunState.gameComplete;
-    final completed = stageComplete || gameComplete;
     final spacing = compact ? 10.0 : 14.0;
     final title = ready
         ? 'READY, PILOT?'
         : paused
         ? 'PAUSED'
         : lost
-        ? 'STAGE FAILED'
-        : stageComplete
-        ? 'STAGE COMPLETE'
-        : 'GAME COMPLETE';
+        ? 'RUN OVER'
+        : 'RUN OVER';
     final subtitle = ready
         ? 'Dodge the red. Chase the glow.'
         : paused
         ? 'Your orbit is on hold.'
         : lost
-        ? 'You collected $_score ${_score == 1 ? 'shard' : 'shards'}.'
-        : stageComplete
-        ? '${stage.name} complete. Next: ${widget.stages[_currentStageIndex + 1].name}.'
-        : 'You mastered all five stages.';
+        ? 'You collected $_score gems and reached $_highestOrbitCount orbits.'
+        : 'Survive, collect gems, and unlock more orbits.';
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -1650,11 +1485,11 @@ class _OrbitGamePageState extends State<OrbitGamePage>
               ? Icons.auto_awesome_rounded
               : paused
               ? Icons.pause_circle_outline_rounded
-              : completed
-              ? Icons.emoji_events_rounded
+              : lost
+              ? Icons.sports_score_rounded
               : Icons.sports_score_rounded,
-          color: completed
-              ? const Color(0xffffd66e)
+          color: lost
+              ? const Color(0xffff7180)
               : paused
               ? const Color(0xff65eaff)
               : ready
@@ -1686,7 +1521,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
         if (ready) ...[
           SizedBox(height: spacing),
           Text(
-            'STAGE ${stage.number} Â· ${stage.name.toUpperCase()}',
+            'SURVIVAL | STARTING ORBITS: 2',
             textAlign: TextAlign.center,
             style: const TextStyle(
               color: Color(0xffd2deef),
@@ -1697,7 +1532,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
           ),
           const SizedBox(height: 6),
           Text(
-            'TARGET ${stage.targetScore}  Â·  ${stage.orbitCount} ORBITS',
+            'ORBIT UNLOCKS AT 10, 25, AND 45 GEMS',
             style: const TextStyle(
               color: Color(0xff8c9bb5),
               fontSize: 10,
@@ -1706,21 +1541,21 @@ class _OrbitGamePageState extends State<OrbitGamePage>
             ),
           ),
           SizedBox(height: compact ? 6 : 8),
-          _resultCard(label: 'BEST FLIGHT', value: '$_best'),
+          _resultCard(label: 'BEST SURVIVAL', value: '$_best'),
         ],
         if (paused) ...[
           SizedBox(height: spacing),
           _resultCard(label: 'CURRENT SCORE', value: '$_score'),
           const SizedBox(height: 6),
           Text(
-            'STAGE ${stage.number} Â· ${stage.name}',
+            'SURVIVAL | $_orbitCount ORBITS',
             style: const TextStyle(color: Color(0xff8c9bb5), fontSize: 10),
           ),
         ],
-        if (lost || completed) ...[
+        if (lost) ...[
           SizedBox(height: compact ? 8 : 12),
           Text(
-            lost ? 'FINAL SCORE' : 'STAGE SCORE',
+            'GEMS COLLECTED',
             style: const TextStyle(
               color: Color(0xff8c9bb5),
               fontSize: 10,
@@ -1737,20 +1572,23 @@ class _OrbitGamePageState extends State<OrbitGamePage>
               fontWeight: FontWeight.w300,
             ),
           ),
-          if (stageComplete)
-            Text(
-              'NEXT STAGE UNLOCKED',
-              style: const TextStyle(
-                color: Color(0xff65eaff),
+          Text(
+            'HIGHEST ORBIT: $_highestOrbitCount',
+            style: const TextStyle(color: Color(0xff65eaff), fontSize: 10),
+          ),
+          if (_newRecord)
+            const Text(
+              'NEW SURVIVAL RECORD!',
+              style: TextStyle(
+                color: Color(0xffffd66e),
                 fontSize: 10,
-                letterSpacing: 1.4,
-                fontWeight: FontWeight.w700,
+                fontWeight: FontWeight.w800,
               ),
             ),
           SizedBox(height: compact ? 6 : 10),
-          _resultCard(label: 'BEST FLIGHT', value: '$_best'),
+          _resultCard(label: 'BEST SURVIVAL', value: '$_best'),
         ],
-        if (showAudioControls) ...[
+        if (showAudioControls && !lost) ...[
           SizedBox(height: compact ? 8 : 12),
           _audioSettingsRow(),
         ],
@@ -1761,35 +1599,29 @@ class _OrbitGamePageState extends State<OrbitGamePage>
               : paused
               ? 'RESUME'
               : lost
-              ? 'RETRY STAGE'
-              : stageComplete
-              ? 'CONTINUE TO STAGE ${stage.number + 1}'
+              ? 'RETRY RUN'
               : 'PLAY AGAIN',
           onPressed: ready
               ? _start
               : paused
               ? _resume
-              : lost
-              ? _start
-              : stageComplete
-              ? () => unawaited(_continueToNextStage())
-              : () => _start(stageIndex: 0),
+              : _start,
         ),
-        if (ready || paused || lost || completed) ...[
+        if (ready || paused || lost) ...[
           const SizedBox(height: 8),
           _secondaryButton(
             label: ready
-                ? 'SELECT STAGE'
+                ? 'ACHIEVEMENTS'
                 : paused
-                ? 'RESTART STAGE'
+                ? 'RESTART RUN'
                 : 'MAIN MENU',
             icon: ready
-                ? Icons.view_carousel_rounded
+                ? Icons.emoji_events_rounded
                 : paused
                 ? Icons.replay_rounded
                 : Icons.home_rounded,
             onPressed: ready
-                ? _openStageSelection
+                ? _openAchievements
                 : paused
                 ? _start
                 : _returnToMenu,
@@ -1855,7 +1687,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
         const Padding(
           padding: EdgeInsets.symmetric(vertical: 16),
           child: Text(
-            'Loading saved progressâ€¦',
+            'Loading saved progress...',
             style: TextStyle(color: Color(0xffaebbd2), fontSize: 12),
           ),
         ),
@@ -1879,10 +1711,14 @@ class _OrbitGamePageState extends State<OrbitGamePage>
         '${math.min(_achievementStore.totalGems, achievement.gemGoal!)}/${achievement.gemGoal} gems',
       AchievementId.savedByShield =>
         unlocked ? 'Shield absorbed a collision' : 'No collision absorbed yet',
-      AchievementId.orbitExplorer =>
-        '${math.min(_highestUnlockedStage, 4)}/4 stages unlocked',
-      AchievementId.orbitalMaster =>
-        unlocked ? 'Final stage completed' : 'Stage 5 not completed yet',
+      AchievementId.orbitExplorer || AchievementId.survivalOrbit3 =>
+        '${math.min(_highestOrbitCount, 3)}/3 orbits reached this run',
+      AchievementId.orbitalMaster || AchievementId.survivalOrbit5 =>
+        unlocked ? 'Five orbits reached' : 'Reach five orbits in one run',
+      AchievementId.survivalOrbit4 =>
+        '${math.min(_highestOrbitCount, 4)}/4 orbits reached this run',
+      AchievementId.survivalRun10 ||
+      AchievementId.survivalRun25 => 'Run goal: ${achievement.gemGoal} gems',
     };
     return Container(
       key: ValueKey('achievement-${achievement.id.name}'),
@@ -2246,9 +2082,9 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     final state = selected
         ? 'EQUIPPED'
         : owned
-        ? 'OWNED Â· EQUIP'
+        ? 'OWNED - EQUIP'
         : canAfford
-        ? 'BUY Â· $price GEMS'
+        ? 'BUY - $price GEMS'
         : 'NEED ${price - _wallet.balance} MORE';
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
@@ -2295,7 +2131,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                       ),
                     ),
                     Text(
-                      '${rarity == CosmeticRarity.premium ? 'PREMIUM' : 'STANDARD'}  Â·  $price GEMS  Â·  $description',
+                      '${rarity == CosmeticRarity.premium ? 'PREMIUM' : 'STANDARD'} | $price GEMS | $description',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -2338,9 +2174,9 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     final state = selected
         ? 'EQUIPPED'
         : owned
-        ? 'OWNED Â· EQUIP'
+        ? 'OWNED - EQUIP'
         : canAfford
-        ? 'BUY Â· ${skin.price} GEMS'
+        ? 'BUY - ${skin.price} GEMS'
         : 'NEED ${skin.price - _wallet.balance} MORE';
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
@@ -2389,7 +2225,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                       ),
                     ),
                     Text(
-                      '${skin.rarity == CosmeticRarity.premium ? 'PREMIUM' : 'STANDARD'}  Â·  ${skin.description}',
+                      '${skin.rarity == CosmeticRarity.premium ? 'PREMIUM' : 'STANDARD'} | ${skin.description}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -2454,13 +2290,23 @@ class _OrbitGamePageState extends State<OrbitGamePage>
         _resultCard(label: 'BEST SCORE', value: '$_best'),
         const SizedBox(height: 6),
         _resultCard(
+          label: 'BEST SURVIVAL RUN',
+          value: '${_statisticsStore.bestRun}',
+        ),
+        const SizedBox(height: 6),
+        _resultCard(
+          label: 'MAX ORBITS REACHED',
+          value: '${_statisticsStore.maxOrbit}',
+        ),
+        const SizedBox(height: 6),
+        _resultCard(
           label: 'RUNS STARTED',
           value: '${_statisticsStore.runsStarted}',
         ),
         const SizedBox(height: 6),
         _resultCard(
-          label: 'DISTINCT STAGES COMPLETED',
-          value: '${_statisticsStore.distinctStagesCompleted}',
+          label: 'HIGHEST ORBIT THIS RUN',
+          value: '$_highestOrbitCount',
         ),
         const SizedBox(height: 6),
         _resultCard(
@@ -2528,7 +2374,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
             Text(
               _dailyChallengesLoadFailed
                   ? 'Could not load daily challenges. Saved progress is unchanged.'
-                  : 'Loading daily challengesâ€¦',
+                  : 'Loading daily challenges...',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: _dailyChallengesLoadFailed
@@ -2608,7 +2454,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  '${challenge.progress} / ${definition.goal}  Â·  ${definition.gemReward} gems',
+                  '${challenge.progress} / ${definition.goal} - ${definition.gemReward} gems',
                   key: ValueKey('daily-progress-${definition.id}'),
                   style: const TextStyle(
                     color: Color(0xffaebbd2),
@@ -2675,7 +2521,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
       Text(
         _featureStoreLoadFailed
             ? 'Could not load saved progress. Existing data was left unchanged.'
-            : 'Loading saved progressâ€¦',
+            : 'Loading saved progress...',
         textAlign: TextAlign.center,
         style: TextStyle(
           color: _featureStoreLoadFailed
@@ -2694,124 +2540,6 @@ class _OrbitGamePageState extends State<OrbitGamePage>
       ],
     ],
   );
-
-  Widget _stageSelectionContent({
-    required bool compact,
-    required bool showAudioControls,
-  }) => Column(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Icon(
-        Icons.view_carousel_rounded,
-        color: const Color(0xff65eaff),
-        size: compact ? 30 : 36,
-      ),
-      SizedBox(height: compact ? 8 : 12),
-      Text(
-        'SELECT STAGE',
-        textAlign: TextAlign.center,
-        style: TextStyle(
-          color: Colors.white,
-          fontSize: compact ? 16 : 18,
-          letterSpacing: 2.2,
-          fontWeight: FontWeight.w800,
-        ),
-      ),
-      const SizedBox(height: 6),
-      const Text(
-        'Choose any stage you have unlocked.',
-        textAlign: TextAlign.center,
-        style: TextStyle(color: Color(0xffaebbd2), fontSize: 12),
-      ),
-      SizedBox(height: compact ? 10 : 14),
-      for (final stage in widget.stages) _stageOption(stage, compact: compact),
-      if (showAudioControls) ...[
-        SizedBox(height: compact ? 6 : 10),
-        _audioSettingsRow(),
-      ],
-      SizedBox(height: compact ? 8 : 12),
-      _secondaryButton(
-        label: 'MAIN MENU',
-        icon: Icons.home_rounded,
-        onPressed: _returnToMenu,
-      ),
-    ],
-  );
-
-  Widget _stageOption(StageDefinition stage, {required bool compact}) {
-    final open = stage.number <= _highestUnlockedStage;
-    final enabled = open && (_stageProgressLoaded || stage.number == 1);
-    final buttonHeight = compact ? 54.0 : 60.0;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: SizedBox(
-        width: double.infinity,
-        height: buttonHeight,
-        child: OutlinedButton(
-          key: ValueKey('stage-option-${stage.number}'),
-          onPressed: enabled
-              ? () => unawaited(_selectStage(stage.number - 1))
-              : null,
-          style: OutlinedButton.styleFrom(
-            alignment: Alignment.centerLeft,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            foregroundColor: Colors.white,
-            disabledForegroundColor: Colors.white38,
-            side: BorderSide(
-              color: open ? const Color(0x6670e9ff) : const Color(0x337d8ba5),
-            ),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-            ),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                open ? Icons.play_circle_outline_rounded : Icons.lock_outline,
-                color: open ? const Color(0xff65eaff) : Colors.white38,
-                size: 20,
-              ),
-              const SizedBox(width: 9),
-              Expanded(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '${stage.number}. ${stage.name}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    Text(
-                      '${stage.targetScore} points Â· ${stage.orbitCount} orbits',
-                      style: const TextStyle(
-                        color: Color(0xff9baac3),
-                        fontSize: 10,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 5),
-              Text(
-                open ? 'OPEN' : 'LOCKED',
-                style: TextStyle(
-                  color: open ? const Color(0xff65eaff) : Colors.white38,
-                  fontSize: 9,
-                  letterSpacing: .8,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 
   Widget _audioSettingsRow() => Row(
     mainAxisAlignment: MainAxisAlignment.center,
@@ -4051,7 +3779,7 @@ class _CosmeticPreviewDialog extends StatelessWidget {
                     ),
                     const SizedBox(height: 5),
                     Text(
-                      '${category.label}  ·  ${rarity == CosmeticRarity.premium ? 'PREMIUM' : 'STANDARD'}',
+                      '${category.label} | ${rarity == CosmeticRarity.premium ? 'PREMIUM' : 'STANDARD'}',
                       key: const ValueKey('cosmetic-preview-category-rarity'),
                       textAlign: TextAlign.center,
                       style: const TextStyle(
