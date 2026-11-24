@@ -5,8 +5,10 @@ import 'package:orbit_dash/achievements.dart';
 import 'package:orbit_dash/audio/game_audio_manager.dart';
 import 'package:orbit_dash/daily_challenges.dart';
 import 'package:orbit_dash/gem_wallet.dart';
+import 'package:orbit_dash/gem_shop.dart';
 import 'package:orbit_dash/player_statistics.dart';
 import 'package:orbit_dash/skins.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -50,6 +52,11 @@ enum RunState {
 }
 
 enum CosmeticShopCategory { ship, orbit, core, trail }
+
+bool isDebugCosmeticTestingEnabled({
+  required bool isDebugBuild,
+  required bool requested,
+}) => isDebugBuild && requested;
 
 /// Deterministic controls and observations for game-cycle widget tests.
 class OrbitGameTestDriver {
@@ -388,9 +395,34 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   final SkinStore _skinStore = SkinStore();
   final AppearanceStore _appearanceStore = AppearanceStore();
   final GemWallet _wallet = GemWallet();
+  bool get _debugCosmeticTestingEnabled => isDebugCosmeticTestingEnabled(
+    isDebugBuild: kDebugMode,
+    requested: _debugCosmeticTestingRequested,
+  );
+  ShipSkinId get _activeShipSkin =>
+      _debugCosmeticTestingEnabled && _debugShipSkin != null
+      ? _debugShipSkin!
+      : _skinStore.selectedSkin;
+  OrbitSkinId get _activeOrbitSkin =>
+      _debugCosmeticTestingEnabled && _debugOrbitSkin != null
+      ? _debugOrbitSkin!
+      : _appearanceStore.selectedOrbit;
+  CoreSkinId get _activeCoreSkin =>
+      _debugCosmeticTestingEnabled && _debugCoreSkin != null
+      ? _debugCoreSkin!
+      : _appearanceStore.selectedCore;
+  TrailSkinId get _activeTrailSkin =>
+      _debugCosmeticTestingEnabled && _debugTrailSkin != null
+      ? _debugTrailSkin!
+      : _appearanceStore.selectedTrail;
   int _pickupSequence = 0;
   int _runToken = 0;
   bool _purchaseInProgress = false;
+  bool _debugCosmeticTestingRequested = false;
+  ShipSkinId? _debugShipSkin;
+  OrbitSkinId? _debugOrbitSkin;
+  CoreSkinId? _debugCoreSkin;
+  TrailSkinId? _debugTrailSkin;
   CosmeticShopCategory _selectedShopCategory = CosmeticShopCategory.ship;
   late final DailyChallengeStore _dailyChallengeStore;
   bool _dailyChallengesLoaded = false;
@@ -460,10 +492,10 @@ class _OrbitGamePageState extends State<OrbitGamePage>
       readRunsStarted: () => _statisticsStore.runsStarted,
       readShieldAbsorptions: () => _statisticsStore.shieldAbsorptions,
       readLosses: () => _statisticsStore.losses,
-      readSelectedSkin: () => _skinStore.selectedSkin,
-      readSelectedOrbit: () => _appearanceStore.selectedOrbit,
-      readSelectedCore: () => _appearanceStore.selectedCore,
-      readSelectedTrail: () => _appearanceStore.selectedTrail,
+      readSelectedSkin: () => _activeShipSkin,
+      readSelectedOrbit: () => _activeOrbitSkin,
+      readSelectedCore: () => _activeCoreSkin,
+      readSelectedTrail: () => _activeTrailSkin,
       readSkinUnlocked: (id) =>
           id == ShipSkinId.defaultSkin || _wallet.owns('ship.${id.name}'),
       flushProgress: _flushProgress,
@@ -921,6 +953,40 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     _audio.setGameState(AudioRunState.menu);
   }
 
+  void _openGemShop() {
+    showDialog<void>(
+      context: context,
+      builder: (_) => GemShopDialog(balance: _wallet.balance),
+    );
+  }
+
+  Widget _getGemsButton({required bool compactWidth}) => Semantics(
+    label: 'Get Gems',
+    button: true,
+    child: Tooltip(
+      message: 'Get Gems',
+      child: SizedBox(
+        width: compactWidth ? 68 : 88,
+        height: 48,
+        child: TextButton(
+          key: const ValueKey('get-gems-button'),
+          onPressed: _openGemShop,
+          style: TextButton.styleFrom(
+            foregroundColor: const Color(0xffffd66e),
+            padding: EdgeInsets.zero,
+            overlayColor: const Color(0x22ffd66e),
+            textStyle: TextStyle(
+              fontSize: compactWidth ? 9 : 10,
+              letterSpacing: compactWidth ? .15 : .6,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          child: const Text('GET GEMS'),
+        ),
+      ),
+    ),
+  );
+
   void _openStatistics() {
     setState(() => _state = RunState.statistics);
     _audio.setGameState(AudioRunState.menu);
@@ -962,6 +1028,10 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   }
 
   Future<void> _selectSkin(ShipSkinId id) async {
+    if (_debugCosmeticTestingEnabled) {
+      setState(() => _debugShipSkin = id);
+      return;
+    }
     final skin = shipSkins.firstWhere((item) => item.id == id);
     final owned = id == ShipSkinId.defaultSkin || _wallet.owns(skin.itemId);
     if (!owned) {
@@ -999,6 +1069,10 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   }
 
   Future<void> _selectOrbitSkin(OrbitSkinId id) async {
+    if (_debugCosmeticTestingEnabled) {
+      setState(() => _debugOrbitSkin = id);
+      return;
+    }
     final skin = orbitSkins.firstWhere((item) => item.id == id);
     if (id != OrbitSkinId.defaultOrbit && !_wallet.owns(skin.itemId)) {
       if (_purchaseInProgress) return;
@@ -1026,6 +1100,10 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   }
 
   Future<void> _selectCoreSkin(CoreSkinId id) async {
+    if (_debugCosmeticTestingEnabled) {
+      setState(() => _debugCoreSkin = id);
+      return;
+    }
     final skin = coreSkins.firstWhere((item) => item.id == id);
     if (id != CoreSkinId.defaultCore && !_wallet.owns(skin.itemId)) {
       if (_purchaseInProgress) return;
@@ -1053,6 +1131,10 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   }
 
   Future<void> _selectTrailSkin(TrailSkinId id) async {
+    if (_debugCosmeticTestingEnabled) {
+      setState(() => _debugTrailSkin = id);
+      return;
+    }
     final skin = trailSkins.firstWhere((item) => item.id == id);
     if (id != TrailSkinId.classic && !_wallet.owns(skin.itemId)) {
       if (_purchaseInProgress) return;
@@ -1139,144 +1221,123 @@ class _OrbitGamePageState extends State<OrbitGamePage>
             constraints.maxWidth,
             constraints.maxHeight * 0.87,
           );
+          final headerLeading = <Widget>[
+            Container(
+              key: const ValueKey('gem-balance-display'),
+              padding: EdgeInsets.symmetric(
+                horizontal: compactWidth ? 2 : 8,
+                vertical: 5,
+              ),
+              decoration: BoxDecoration(
+                color: const Color(0xff1b2233),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0x66ffd66e)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.diamond_rounded, color: Color(0xffffd66e), size: 17),
+                  const SizedBox(width: 5),
+                  Text(
+                    '${_wallet.balance} G',
+                    key: const ValueKey('main-menu-gem-balance'),
+                    style: const TextStyle(color: Color(0xffffd66e), fontSize: 12, fontWeight: FontWeight.w900),
+                  ),
+                ],
+              ),
+            ),
+            if (_state == RunState.ready) ...[
+              SizedBox(width: compactWidth ? 0 : 7),
+              _getGemsButton(compactWidth: compactWidth),
+            ],
+            SizedBox(width: compactWidth ? 0 : 9),
+            if (!compactWidth)
+              Text(
+                'ORBIT DASH',
+                style: TextStyle(
+                  letterSpacing: constraints.maxWidth < 760 ? 1 : 3,
+                  fontWeight: FontWeight.w800,
+                  fontSize: constraints.maxWidth < 760 ? 11 : 14,
+                ),
+              ),
+          ];
+          final headerTrailing = <Widget>[
+            if (_state == RunState.ready)
+              IconButton(
+                onPressed: _openAchievements,
+                tooltip: 'Achievements',
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.emoji_events_rounded, color: Color(0xffffd66e)),
+              ),
+            if (_state == RunState.ready)
+              IconButton(
+                onPressed: _openDailyChallenges,
+                tooltip: 'Daily challenges',
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.calendar_today_rounded, color: Color(0xff65eaff)),
+              ),
+            if (_state == RunState.ready) ...[
+              IconButton(
+                onPressed: _openSkins,
+                tooltip: 'Cosmetic shop',
+                visualDensity: VisualDensity.compact,
+                icon: Icon(Icons.palette_rounded, color: _skinColor(_activeShipSkin)),
+              ),
+              IconButton(
+                onPressed: _openStatistics,
+                tooltip: 'Player statistics',
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.query_stats_rounded, color: Color(0xff65eaff)),
+              ),
+            ],
+            if (_state != RunState.playing && constraints.maxWidth >= 400) ...[
+              IconButton(
+                onPressed: _toggleMusic,
+                tooltip: _audio.musicEnabled ? 'Music on' : 'Music off',
+                visualDensity: VisualDensity.compact,
+                icon: Icon(_audio.musicEnabled ? Icons.music_note_rounded : Icons.music_off_rounded, color: _audio.musicEnabled ? const Color(0xff65eaff) : Colors.white38),
+              ),
+              IconButton(
+                onPressed: _toggleEffects,
+                tooltip: _audio.effectsEnabled ? 'Sound effects on' : 'Sound effects off',
+                visualDensity: VisualDensity.compact,
+                icon: Icon(_audio.effectsEnabled ? Icons.volume_up_rounded : Icons.volume_off_rounded, color: _audio.effectsEnabled ? const Color(0xff65eaff) : Colors.white38),
+              ),
+            ],
+            if (_state == RunState.playing) ...[
+              _scorePill('BEST', '$_best'),
+              const SizedBox(width: 10),
+              IconButton(
+                onPressed: _pause,
+                tooltip: 'Pause',
+                icon: const Icon(Icons.pause_rounded, color: Colors.white70),
+              ),
+            ],
+          ];
           return Column(
             children: [
               Padding(
                 padding: EdgeInsets.fromLTRB(
-                  compactWidth ? 12 : 24,
+                  compactWidth ? 12 : 18,
                   14,
-                  compactWidth ? 12 : 24,
-                  4,
+                  compactWidth ? 12 : 18,
+                  compactWidth ? 2 : 4,
                 ),
-                child: Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: const Color(0xff1b2233),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: const Color(0x66ffd66e)),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
+                child: constraints.maxWidth < 300
+                    ? Wrap(
+                        spacing: 2,
+                        runSpacing: 2,
+                        alignment: WrapAlignment.spaceBetween,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [...headerLeading, ...headerTrailing],
+                      )
+                    : Row(
                         children: [
-                          const Icon(
-                            Icons.diamond_rounded,
-                            color: Color(0xffffd66e),
-                            size: 17,
-                          ),
-                          const SizedBox(width: 5),
-                          Text(
-                            '${_wallet.balance} G',
-                            key: const ValueKey('main-menu-gem-balance'),
-                            style: const TextStyle(
-                              color: Color(0xffffd66e),
-                              fontSize: 12,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
+                          ...headerLeading,
+                          const Spacer(),
+                          ...headerTrailing,
                         ],
                       ),
-                    ),
-                    const SizedBox(width: 9),
-                    if (!compactWidth)
-                      const Text(
-                        'ORBIT DASH',
-                        style: TextStyle(
-                          letterSpacing: 3,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 14,
-                        ),
-                      ),
-                    const Spacer(),
-                    if (_state == RunState.ready)
-                      IconButton(
-                        onPressed: _openAchievements,
-                        tooltip: 'Achievements',
-                        visualDensity: VisualDensity.compact,
-                        icon: const Icon(
-                          Icons.emoji_events_rounded,
-                          color: Color(0xffffd66e),
-                        ),
-                      ),
-                    if (_state == RunState.ready)
-                      IconButton(
-                        onPressed: _openDailyChallenges,
-                        tooltip: 'Daily challenges',
-                        visualDensity: VisualDensity.compact,
-                        icon: const Icon(
-                          Icons.calendar_today_rounded,
-                          color: Color(0xff65eaff),
-                        ),
-                      ),
-                    if (_state == RunState.ready) ...[
-                      IconButton(
-                        onPressed: _openSkins,
-                        tooltip: 'Cosmetic shop',
-                        visualDensity: VisualDensity.compact,
-                        icon: Icon(
-                          Icons.palette_rounded,
-                          color: _skinColor(_skinStore.selectedSkin),
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: _openStatistics,
-                        tooltip: 'Player statistics',
-                        visualDensity: VisualDensity.compact,
-                        icon: const Icon(
-                          Icons.query_stats_rounded,
-                          color: Color(0xff65eaff),
-                        ),
-                      ),
-                    ],
-                    if (_state != RunState.playing &&
-                        constraints.maxWidth >= 400) ...[
-                      IconButton(
-                        onPressed: _toggleMusic,
-                        tooltip: _audio.musicEnabled ? 'Music on' : 'Music off',
-                        visualDensity: VisualDensity.compact,
-                        icon: Icon(
-                          _audio.musicEnabled
-                              ? Icons.music_note_rounded
-                              : Icons.music_off_rounded,
-                          color: _audio.musicEnabled
-                              ? const Color(0xff65eaff)
-                              : Colors.white38,
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: _toggleEffects,
-                        tooltip: _audio.effectsEnabled
-                            ? 'Sound effects on'
-                            : 'Sound effects off',
-                        visualDensity: VisualDensity.compact,
-                        icon: Icon(
-                          _audio.effectsEnabled
-                              ? Icons.volume_up_rounded
-                              : Icons.volume_off_rounded,
-                          color: _audio.effectsEnabled
-                              ? const Color(0xff65eaff)
-                              : Colors.white38,
-                        ),
-                      ),
-                    ],
-                    if (_state == RunState.playing) ...[
-                      _scorePill('BEST', '$_best'),
-                      const SizedBox(width: 10),
-                      IconButton(
-                        onPressed: _pause,
-                        tooltip: 'Pause',
-                        icon: const Icon(
-                          Icons.pause_rounded,
-                          color: Colors.white70,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
               ),
               Expanded(
                 child: GestureDetector(
@@ -1294,32 +1355,37 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                           key: ValueKey('orbit-lane-$_lane'),
                           child: KeyedSubtree(
                             key: ValueKey(
-                              'orbit-style-${_appearanceStore.selectedOrbit.name}-${_appearanceStore.selectedCore.name}',
+                              'orbit-style-${_activeOrbitSkin.name}-${_activeCoreSkin.name}',
                             ),
                             child: KeyedSubtree(
                               key: ValueKey(
-                                'orbit-painter-highlight-${highlightedOrbitLane ?? 'none'}',
+                                'cosmetic-selection-${_activeShipSkin.name}-${_activeOrbitSkin.name}-${_activeCoreSkin.name}-${_activeTrailSkin.name}',
                               ),
-                              child: CustomPaint(
-                                key: _shield.isActive
-                                    ? const ValueKey('shield-aura-visible')
-                                    : null,
-                                size: Size.square(side),
-                                painter: _OrbitPainter(
-                                  angle: _angle,
-                                  lane: _lane,
-                                  orbitCount: _orbitCount,
-                                  highlightedOrbitLane: highlightedOrbitLane,
-                                  hazards: List.of(_hazards),
-                                  gemAngle: _gemAngle,
-                                  gemLane: _gemLane,
-                                  shieldAngle: _shieldPickup?.angle,
-                                  shieldLane: _shieldPickup?.lane,
-                                  shieldActive: _shield.isActive,
-                                  playerSkin: _skinStore.selectedSkin,
-                                  trailSkin: _appearanceStore.selectedTrail,
-                                  orbitSkin: _appearanceStore.selectedOrbit,
-                                  coreSkin: _appearanceStore.selectedCore,
+                              child: KeyedSubtree(
+                                key: ValueKey(
+                                  'orbit-painter-highlight-${highlightedOrbitLane ?? 'none'}',
+                                ),
+                                child: CustomPaint(
+                                  key: _shield.isActive
+                                      ? const ValueKey('shield-aura-visible')
+                                      : null,
+                                  size: Size.square(side),
+                                  painter: _OrbitPainter(
+                                    angle: _angle,
+                                    lane: _lane,
+                                    orbitCount: _orbitCount,
+                                    highlightedOrbitLane: highlightedOrbitLane,
+                                    hazards: List.of(_hazards),
+                                    gemAngle: _gemAngle,
+                                    gemLane: _gemLane,
+                                    shieldAngle: _shieldPickup?.angle,
+                                    shieldLane: _shieldPickup?.lane,
+                                    shieldActive: _shield.isActive,
+                                    playerSkin: _activeShipSkin,
+                                    trailSkin: _activeTrailSkin,
+                                    orbitSkin: _activeOrbitSkin,
+                                    coreSkin: _activeCoreSkin,
+                                  ),
                                 ),
                               ),
                             ),
@@ -1376,6 +1442,25 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                                     ),
                                   ),
                                 ),
+                                if (_debugCosmeticTestingEnabled)
+                                  const Text(
+                                    'DEBUG COSMETIC TEST MODE',
+                                    key: ValueKey(
+                                      'debug-cosmetic-game-indicator',
+                                    ),
+                                    style: TextStyle(
+                                      color: Color(0xff65eaff),
+                                      fontSize: 8,
+                                      letterSpacing: .7,
+                                      fontWeight: FontWeight.w800,
+                                      shadows: [
+                                        Shadow(
+                                          color: Color(0xaa000000),
+                                          blurRadius: 4,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
                                 const SizedBox(height: 1),
                                 Text(
                                   '$_score',
@@ -1872,11 +1957,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   }) => Column(
     mainAxisSize: MainAxisSize.min,
     children: [
-      Icon(
-        Icons.palette_rounded,
-        color: _skinColor(_skinStore.selectedSkin),
-        size: 32,
-      ),
+      Icon(Icons.palette_rounded, color: _skinColor(_activeShipSkin), size: 32),
       SizedBox(height: compact ? 7 : 10),
       Text(
         'COSMETIC SHOP',
@@ -1904,6 +1985,46 @@ class _OrbitGamePageState extends State<OrbitGamePage>
           fontWeight: FontWeight.w900,
         ),
       ),
+      if (kDebugMode) ...[
+        const SizedBox(height: 7),
+        OutlinedButton.icon(
+          key: const ValueKey('debug-cosmetic-test-toggle'),
+          onPressed: () => setState(() {
+            _debugCosmeticTestingRequested = !_debugCosmeticTestingEnabled;
+            _debugShipSkin = null;
+            _debugOrbitSkin = null;
+            _debugCoreSkin = null;
+            _debugTrailSkin = null;
+          }),
+          icon: Icon(
+            _debugCosmeticTestingEnabled
+                ? Icons.science_rounded
+                : Icons.science_outlined,
+            size: 15,
+          ),
+          label: Text(
+            _debugCosmeticTestingEnabled
+                ? 'DISABLE COSMETIC TEST MODE'
+                : 'ENABLE ALL COSMETIC TESTING',
+          ),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: const Color(0xff65eaff),
+            visualDensity: VisualDensity.compact,
+            textStyle: const TextStyle(fontSize: 9, letterSpacing: .7),
+          ),
+        ),
+        if (_debugCosmeticTestingEnabled)
+          const Text(
+            'TEMPORARY DEBUG COSMETIC TESTING ACTIVE',
+            key: ValueKey('debug-cosmetic-test-active'),
+            style: TextStyle(
+              color: Color(0xff65eaff),
+              fontSize: 8,
+              letterSpacing: .6,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+      ],
       SizedBox(height: compact ? 9 : 12),
       if (!_featureStoresLoaded)
         _progressStoreMessage()
@@ -1925,9 +2046,9 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                 category: CosmeticShopCategory.ship,
                 rarity: skin.rarity,
                 playerSkin: skin.id,
-                trailSkin: _appearanceStore.selectedTrail,
-                orbitSkin: _appearanceStore.selectedOrbit,
-                coreSkin: _appearanceStore.selectedCore,
+                trailSkin: _activeTrailSkin,
+                orbitSkin: _activeOrbitSkin,
+                coreSkin: _activeCoreSkin,
               ),
             )
         else if (_selectedShopCategory == CosmeticShopCategory.orbit)
@@ -1946,20 +2067,22 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                 rarity: skin.rarity,
                 price: skin.price,
                 owned:
+                    _debugCosmeticTestingEnabled ||
                     skin.id == OrbitSkinId.defaultOrbit ||
                     _wallet.owns(skin.itemId),
-                selected: _appearanceStore.selectedOrbit == skin.id,
+                selected: _activeOrbitSkin == skin.id,
                 accent: _orbitColor(skin.id),
+                temporaryTesting: _debugCosmeticTestingEnabled,
                 onSelect: () => _selectOrbitSkin(skin.id),
               ),
               onPreview: () => _showCosmeticPreview(
                 name: skin.name,
                 category: CosmeticShopCategory.orbit,
                 rarity: skin.rarity,
-                playerSkin: _skinStore.selectedSkin,
-                trailSkin: _appearanceStore.selectedTrail,
+                playerSkin: _activeShipSkin,
+                trailSkin: _activeTrailSkin,
                 orbitSkin: skin.id,
-                coreSkin: _appearanceStore.selectedCore,
+                coreSkin: _activeCoreSkin,
               ),
             )
         else if (_selectedShopCategory == CosmeticShopCategory.core)
@@ -1978,19 +2101,21 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                 rarity: skin.rarity,
                 price: skin.price,
                 owned:
+                    _debugCosmeticTestingEnabled ||
                     skin.id == CoreSkinId.defaultCore ||
                     _wallet.owns(skin.itemId),
-                selected: _appearanceStore.selectedCore == skin.id,
+                selected: _activeCoreSkin == skin.id,
                 accent: _coreColor(skin.id),
+                temporaryTesting: _debugCosmeticTestingEnabled,
                 onSelect: () => _selectCoreSkin(skin.id),
               ),
               onPreview: () => _showCosmeticPreview(
                 name: skin.name,
                 category: CosmeticShopCategory.core,
                 rarity: skin.rarity,
-                playerSkin: _skinStore.selectedSkin,
-                trailSkin: _appearanceStore.selectedTrail,
-                orbitSkin: _appearanceStore.selectedOrbit,
+                playerSkin: _activeShipSkin,
+                trailSkin: _activeTrailSkin,
+                orbitSkin: _activeOrbitSkin,
                 coreSkin: skin.id,
               ),
             )
@@ -2010,19 +2135,22 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                 rarity: skin.rarity,
                 price: skin.price,
                 owned:
-                    skin.id == TrailSkinId.classic || _wallet.owns(skin.itemId),
-                selected: _appearanceStore.selectedTrail == skin.id,
+                    _debugCosmeticTestingEnabled ||
+                    skin.id == TrailSkinId.classic ||
+                    _wallet.owns(skin.itemId),
+                selected: _activeTrailSkin == skin.id,
                 accent: _trailColor(skin.id),
+                temporaryTesting: _debugCosmeticTestingEnabled,
                 onSelect: () => _selectTrailSkin(skin.id),
               ),
               onPreview: () => _showCosmeticPreview(
                 name: skin.name,
                 category: CosmeticShopCategory.trail,
                 rarity: skin.rarity,
-                playerSkin: _skinStore.selectedSkin,
+                playerSkin: _activeShipSkin,
                 trailSkin: skin.id,
-                orbitSkin: _appearanceStore.selectedOrbit,
-                coreSkin: _appearanceStore.selectedCore,
+                orbitSkin: _activeOrbitSkin,
+                coreSkin: _activeCoreSkin,
               ),
             ),
       ],
@@ -2167,11 +2295,14 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     required bool owned,
     required bool selected,
     required Color accent,
+    bool temporaryTesting = false,
     required Future<void> Function() onSelect,
   }) {
     final canAfford = _wallet.balance >= price;
     final state = selected
         ? 'EQUIPPED'
+        : temporaryTesting
+        ? 'TEST - EQUIP'
         : owned
         ? 'OWNED - EQUIP'
         : canAfford
@@ -2179,6 +2310,8 @@ class _OrbitGamePageState extends State<OrbitGamePage>
         : 'NEED ${price - _wallet.balance} MORE';
     final statusColor = selected
         ? accent
+        : temporaryTesting
+        ? const Color(0xff65eaff)
         : owned
         ? Colors.white70
         : canAfford
@@ -2300,11 +2433,15 @@ class _OrbitGamePageState extends State<OrbitGamePage>
 
   Widget _skinOption(ShipSkin skin) {
     final owned =
-        skin.id == ShipSkinId.defaultSkin || _wallet.owns(skin.itemId);
-    final selected = _skinStore.selectedSkin == skin.id;
+        _debugCosmeticTestingEnabled ||
+        skin.id == ShipSkinId.defaultSkin ||
+        _wallet.owns(skin.itemId);
+    final selected = _activeShipSkin == skin.id;
     final canAfford = _wallet.balance >= skin.price;
     final state = selected
         ? 'EQUIPPED'
+        : _debugCosmeticTestingEnabled
+        ? 'TEST - EQUIP'
         : owned
         ? 'OWNED - EQUIP'
         : canAfford
@@ -4144,3 +4281,88 @@ extension on CosmeticShopCategory {
 Color _trailColor(TrailSkinId skin) => Color(trailVisualStyles[skin]!.color);
 
 Color _skinColor(ShipSkinId skin) => Color(shipVisualStyles[skin]!.color);
+
+class GemShopDialog extends StatefulWidget {
+  const GemShopDialog({super.key, required this.balance, this.service = const UnavailableGemPurchaseService()});
+
+  final int balance;
+  final GemPurchaseService service;
+
+  @override
+  State<GemShopDialog> createState() => _GemShopDialogState();
+}
+
+class _GemShopDialogState extends State<GemShopDialog> {
+  String? _selectedId;
+  bool _pending = false;
+  String? _message;
+
+  Future<void> _purchase(GemPackage package) async {
+    if (_pending) return;
+    setState(() { _pending = true; _message = null; });
+    try {
+      final result = await widget.service.purchase(package);
+      if (!mounted) return;
+      setState(() => _message = result.status == GemPurchaseStatus.unavailable
+          ? 'Purchases are coming soon. Your Gem balance has not changed.'
+          : 'Purchase could not be completed.');
+    } catch (_) {
+      if (mounted) setState(() => _message = 'Purchase could not be completed. Please try again later.');
+    } finally {
+      if (mounted) setState(() => _pending = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Dialog(
+    backgroundColor: const Color(0xff10182a),
+    insetPadding: const EdgeInsets.all(18),
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 470, maxHeight: 680),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Icon(Icons.diamond_rounded, color: Color(0xffffd66e), size: 34),
+          const SizedBox(height: 6),
+          const Text('GEM SHOP', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, letterSpacing: 2)),
+          const SizedBox(height: 5),
+          Text('YOUR BALANCE  ${widget.balance} G', key: const ValueKey('gem-shop-balance'), style: const TextStyle(color: Color(0xffffd66e), fontWeight: FontWeight.w800)),
+          const SizedBox(height: 14),
+          for (final package in [...gemPackages]..sort((a, b) => a.displayOrder.compareTo(b.displayOrder)))
+            _packageTile(package),
+          if (_message != null) Padding(padding: const EdgeInsets.only(top: 10), child: Text(_message!, key: const ValueKey('gem-purchase-message'), textAlign: TextAlign.center, style: const TextStyle(color: Color(0xff65eaff), fontSize: 12))),
+          const SizedBox(height: 10),
+          TextButton(onPressed: _pending ? null : () => Navigator.of(context).pop(), child: const Text('CLOSE')),
+        ]),
+      ),
+    ),
+  );
+
+  Widget _packageTile(GemPackage package) {
+    final selected = package.id == _selectedId;
+    return InkWell(
+      key: ValueKey('gem-package-${package.id}'),
+      onTap: _pending ? null : () => setState(() { _selectedId = package.id; _message = null; }),
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(color: selected ? const Color(0x3328c9e8) : const Color(0xff1b263c), borderRadius: BorderRadius.circular(14), border: Border.all(color: package.featured ? const Color(0xffffd66e) : selected ? const Color(0xff65eaff) : const Color(0xff34435e))),
+        child: Row(children: [
+          const Icon(Icons.diamond_rounded, color: Color(0xffffd66e)),
+          const SizedBox(width: 10),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('${package.totalGems} GEMS', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
+            if (package.bonusGems > 0) Text('${package.gems} + ${package.bonusGems} BONUS', style: const TextStyle(color: Color(0xff65eaff), fontSize: 10, fontWeight: FontWeight.w700)),
+            if (package.featured) const Text('BEST VALUE', style: TextStyle(color: Color(0xffffd66e), fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 1)),
+          ])),
+          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+            Text(package.displayPrice ?? 'Price coming soon', style: const TextStyle(color: Color(0xffaebbd2), fontSize: 10)),
+            const SizedBox(height: 4),
+            FilledButton(onPressed: _pending ? null : () => _purchase(package), child: _pending ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('NOT AVAILABLE')),
+          ]),
+        ]),
+      ),
+    );
+  }
+}
