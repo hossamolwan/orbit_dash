@@ -27,6 +27,132 @@ void _expectRarityColor(RichText richText, String label, Color color) {
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
+  test('cosmetic testing mode is unavailable outside Debug builds', () {
+    expect(
+      isDebugCosmeticTestingEnabled(isDebugBuild: false, requested: true),
+      isFalse,
+    );
+    expect(
+      isDebugCosmeticTestingEnabled(isDebugBuild: true, requested: true),
+      isTrue,
+    );
+  });
+
+  testWidgets('debug mode temporarily equips every market cosmetic', (
+    tester,
+  ) async {
+    const walletState =
+        '{"version":2,"balance":500,"dailyRewardDate":null,"dailyRewardIds":[],"purchases":{"ship.emerald":40,"orbit.aurora":60,"core.crimson":75,"trail.solar":100}}';
+    SharedPreferences.setMockInitialValues({
+      GemWallet.stateKey: walletState,
+      SkinStore.selectedSkinKey: 'emerald',
+      AppearanceStore.selectedOrbitKey: 'aurora',
+      AppearanceStore.selectedCoreKey: 'crimson',
+      AppearanceStore.selectedTrailKey: 'solar',
+    });
+    final driver = OrbitGameTestDriver();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: OrbitGamePage(audioController: _ShopAudio(), testDriver: driver),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await driver.flushProgress();
+    await tester.tap(find.byTooltip('Cosmetic shop'));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('debug-cosmetic-test-toggle')),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const ValueKey('debug-cosmetic-test-toggle')));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('debug-cosmetic-test-active')),
+      findsOneWidget,
+    );
+
+    for (final skin in shipSkins) {
+      final option = find.byKey(ValueKey('skin-option-${skin.id.name}'));
+      await tester.ensureVisible(option);
+      expect(tester.widget<OutlinedButton>(option).onPressed, isNotNull);
+      await tester.tap(option);
+      await tester.pumpAndSettle();
+      expect(driver.selectedSkin, skin.id);
+    }
+    Future<void> selectAll<T>(
+      String category,
+      Iterable<T> skins,
+      String Function(T) id,
+      String Function() selected,
+    ) async {
+      final tab = find.byKey(ValueKey('cosmetic-tab-$category'));
+      await tester.ensureVisible(tab);
+      await tester.tap(tab);
+      await tester.pumpAndSettle();
+      for (final skin in skins) {
+        final option = find.byKey(ValueKey('$category-option-${id(skin)}'));
+        await tester.ensureVisible(option);
+        expect(tester.widget<OutlinedButton>(option).onPressed, isNotNull);
+        await tester.tap(option);
+        await tester.pumpAndSettle();
+        expect(selected(), id(skin));
+      }
+    }
+
+    await selectAll(
+      'orbit',
+      orbitSkins,
+      (skin) => skin.id.name,
+      () => driver.selectedOrbit.name,
+    );
+    await selectAll(
+      'core',
+      coreSkins,
+      (skin) => skin.id.name,
+      () => driver.selectedCore.name,
+    );
+    await selectAll(
+      'trail',
+      trailSkins,
+      (skin) => skin.id.name,
+      () => driver.selectedTrail.name,
+    );
+    expect(driver.walletBalance, 500);
+    expect(driver.skinUnlocked(ShipSkinId.phantom), isFalse);
+    await driver.flushProgress();
+    final preferences = await SharedPreferences.getInstance();
+    expect(preferences.getString(GemWallet.stateKey), walletState);
+    expect(preferences.getString(SkinStore.selectedSkinKey), 'emerald');
+    expect(preferences.getString(AppearanceStore.selectedOrbitKey), 'aurora');
+    expect(preferences.getString(AppearanceStore.selectedCoreKey), 'crimson');
+    expect(preferences.getString(AppearanceStore.selectedTrailKey), 'solar');
+
+    await tester.tap(find.text('MAIN MENU'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('START RUN'));
+    await tester.pump();
+    expect(driver.runState, RunState.playing);
+    expect(
+      find.byKey(const ValueKey('debug-cosmetic-game-indicator')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(
+        ValueKey(
+          'orbit-style-${OrbitSkinId.radiant.name}-${CoreSkinId.quantum.name}',
+        ),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(
+        const ValueKey('cosmetic-selection-phantom-radiant-quantum-spectrum'),
+      ),
+      findsOneWidget,
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('shop sorts cosmetics by rarity and price in every tab', (
     tester,
   ) async {
