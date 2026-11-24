@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
 
-/// Stable store products. Price strings are intentionally unset until approved.
+/// Stable store products, including display-only approved price metadata.
 @immutable
 class GemPackage {
   const GemPackage({
@@ -22,16 +22,34 @@ class GemPackage {
 }
 
 const gemPackages = <GemPackage>[
-  GemPackage(id: 'gems.small', gems: 500, displayOrder: 0),
-  GemPackage(id: 'gems.medium', gems: 1200, bonusGems: 100, displayOrder: 1),
+  GemPackage(
+    id: 'gems.small',
+    gems: 500,
+    displayOrder: 0,
+    displayPrice: r'$0.99',
+  ),
+  GemPackage(
+    id: 'gems.medium',
+    gems: 1200,
+    bonusGems: 100,
+    displayOrder: 1,
+    displayPrice: r'$2.99',
+  ),
   GemPackage(
     id: 'gems.large',
     gems: 2500,
     bonusGems: 350,
     displayOrder: 2,
     featured: true,
+    displayPrice: r'$4.99',
   ),
-  GemPackage(id: 'gems.mega', gems: 6000, bonusGems: 1200, displayOrder: 3),
+  GemPackage(
+    id: 'gems.mega',
+    gems: 6000,
+    bonusGems: 1200,
+    displayOrder: 3,
+    displayPrice: r'$9.99',
+  ),
 ];
 
 enum GemPurchaseStatus { unavailable }

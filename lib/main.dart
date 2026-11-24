@@ -4357,7 +4357,7 @@ class _GemShopDialogState extends State<GemShopDialog> {
             if (package.featured) const Text('BEST VALUE', style: TextStyle(color: Color(0xffffd66e), fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 1)),
           ])),
           Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-            Text(package.displayPrice ?? 'Price coming soon', style: const TextStyle(color: Color(0xffaebbd2), fontSize: 10)),
+            Text(package.displayPrice ?? '—', style: const TextStyle(color: Color(0xffaebbd2), fontSize: 10)),
             const SizedBox(height: 4),
             FilledButton(onPressed: _pending ? null : () => _purchase(package), child: _pending ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('NOT AVAILABLE')),
           ]),

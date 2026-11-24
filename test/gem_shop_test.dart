@@ -7,12 +7,12 @@ import 'package:orbit_dash/main.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
-  test('Gem package catalog has stable ordered products and no unapproved prices', () {
+  test('Gem package catalog has stable ordered products and approved prices', () {
     expect(gemPackages.map((p) => p.id), ['gems.small', 'gems.medium', 'gems.large', 'gems.mega']);
     expect(gemPackages.map((p) => p.totalGems), [500, 1300, 2850, 7200]);
     expect(gemPackages.map((p) => p.displayOrder), [0, 1, 2, 3]);
+    expect(gemPackages.map((p) => p.displayPrice), [r'$0.99', r'$2.99', r'$4.99', r'$9.99']);
     expect(gemPackages.where((p) => p.featured).map((p) => p.id), ['gems.large']);
-    expect(gemPackages.every((p) => p.displayPrice == null), isTrue);
   });
 
   testWidgets('Gem shop renders packages and purchase does not change wallet', (tester) async {
@@ -24,7 +24,10 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: GemShopDialog(balance: wallet.balance))));
     expect(find.text('YOUR BALANCE  42 G'), findsOneWidget);
     expect(find.text('BEST VALUE'), findsOneWidget);
-    expect(find.text('Price coming soon'), findsNWidgets(4));
+    expect(find.text(r'$0.99'), findsOneWidget);
+    expect(find.text(r'$2.99'), findsOneWidget);
+    expect(find.text(r'$4.99'), findsOneWidget);
+    expect(find.text(r'$9.99'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('gem-package-gems.small')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('NOT AVAILABLE').first);
