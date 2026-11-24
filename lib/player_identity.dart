@@ -30,7 +30,7 @@ class PlayerIdentitySnapshot {
   final PlayerIdentityFailureCode? failureCode;
   bool get isAuthenticated =>
       status == PlayerIdentityStatus.authenticated && identity != null;
-  bool get hasRecoverableIdentity => isAuthenticated;
+  bool get hasRecoverableIdentity => isAuthenticated && identity!.id.isNotEmpty;
 
   PlayerIdentity requireRecoverableIdentity() {
     if (!hasRecoverableIdentity) {

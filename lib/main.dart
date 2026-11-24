@@ -25,16 +25,20 @@ Color _cosmeticRarityColor(CosmeticRarity rarity) => switch (rarity) {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  final identityService = await createFirebasePlayerIdentityService();
-  runApp(OrbitDashApp(identityService: identityService));
-  unawaited(identityService.initialize());
+  runApp(const OrbitDashApp());
 }
 
 class OrbitDashApp extends StatelessWidget {
-  const OrbitDashApp({super.key, this.audioController, this.identityService});
+  const OrbitDashApp({
+    super.key,
+    this.audioController,
+    this.identityService,
+    this.identityServiceFactory,
+  });
 
   final GameAudioController? audioController;
   final PlayerIdentityService? identityService;
+  final Future<PlayerIdentityService> Function()? identityServiceFactory;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -44,10 +48,378 @@ class OrbitDashApp extends StatelessWidget {
       scaffoldBackgroundColor: const Color(0xff070b18),
       colorScheme: const ColorScheme.dark(primary: Color(0xff55e7ff)),
     ),
-    home: OrbitGamePage(
+    home: PlayerAuthenticationGate(
       audioController: audioController,
       identityService: identityService,
+      identityServiceFactory:
+          identityServiceFactory ?? createFirebasePlayerIdentityService,
     ),
+  );
+}
+
+class PlayerAuthenticationGate extends StatefulWidget {
+  const PlayerAuthenticationGate({
+    super.key,
+    required this.audioController,
+    required this.identityServiceFactory,
+    this.identityService,
+  });
+
+  final GameAudioController? audioController;
+  final PlayerIdentityService? identityService;
+  final Future<PlayerIdentityService> Function() identityServiceFactory;
+
+  @override
+  State<PlayerAuthenticationGate> createState() =>
+      _PlayerAuthenticationGateState();
+}
+
+class _PlayerAuthenticationGateState extends State<PlayerAuthenticationGate> {
+  PlayerIdentityService? _identityService;
+  StreamSubscription<PlayerIdentitySnapshot>? _identitySubscription;
+  PlayerIdentitySnapshot _identityState = const PlayerIdentitySnapshot(
+    status: PlayerIdentityStatus.initializing,
+  );
+  bool _requestInProgress = false;
+  bool _creatingService = false;
+  String? _message;
+
+  @override
+  void initState() {
+    super.initState();
+    final injectedService = widget.identityService;
+    if (injectedService != null) {
+      _attachService(injectedService);
+    } else {
+      unawaited(_createAndAttachService());
+    }
+  }
+
+  @override
+  void dispose() {
+    unawaited(_identitySubscription?.cancel());
+    super.dispose();
+  }
+
+  Future<void> _createAndAttachService() async {
+    if (_creatingService) return;
+    setState(() {
+      _creatingService = true;
+      _message = null;
+      _identityState = const PlayerIdentitySnapshot(
+        status: PlayerIdentityStatus.initializing,
+      );
+    });
+    try {
+      final service = await widget.identityServiceFactory();
+      if (!mounted) return;
+      _attachService(service);
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _identityState = const PlayerIdentitySnapshot(
+            status: PlayerIdentityStatus.unavailable,
+            failureCode: PlayerIdentityFailureCode.unavailable,
+          );
+          _message = 'Sign-in is temporarily unavailable. Please try again.';
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _creatingService = false);
+    }
+  }
+
+  void _attachService(PlayerIdentityService service) {
+    unawaited(_identitySubscription?.cancel());
+    setState(() {
+      _identityService = service;
+      _identityState = service.state;
+      _message = null;
+    });
+    _identitySubscription = service.states.listen((state) {
+      if (!mounted) return;
+      setState(() {
+        _identityState = state;
+        if (state.status == PlayerIdentityStatus.authenticated) {
+          _message = null;
+        } else if (state.failureCode == PlayerIdentityFailureCode.canceled) {
+          _message = 'Sign-in was canceled. Choose an account to continue.';
+        } else if (state.status == PlayerIdentityStatus.unavailable) {
+          _message = 'Sign-in is temporarily unavailable. Please try again.';
+        }
+      });
+    });
+    unawaited(_initializeService(service));
+  }
+
+  Future<void> _initializeService(PlayerIdentityService service) async {
+    try {
+      await service.initialize().timeout(const Duration(seconds: 45));
+    } on TimeoutException {
+      if (mounted && identical(service, _identityService)) {
+        setState(() {
+          _identityState = const PlayerIdentitySnapshot(
+            status: PlayerIdentityStatus.unavailable,
+            failureCode: PlayerIdentityFailureCode.unavailable,
+          );
+          _message = 'Sign-in took too long. Check your connection and retry.';
+        });
+      }
+    } catch (_) {
+      if (mounted && identical(service, _identityService)) {
+        setState(() {
+          _identityState = const PlayerIdentitySnapshot(
+            status: PlayerIdentityStatus.unavailable,
+            failureCode: PlayerIdentityFailureCode.unavailable,
+          );
+          _message = 'Sign-in is temporarily unavailable. Please try again.';
+        });
+      }
+    }
+  }
+
+  Future<void> _retryAuthentication() async {
+    if (_requestInProgress || _creatingService) return;
+    final service = _identityService;
+    if (service == null || service is UnavailablePlayerIdentityService) {
+      await _createAndAttachService();
+      return;
+    }
+
+    setState(() {
+      _requestInProgress = true;
+      _message = null;
+      _identityState = const PlayerIdentitySnapshot(
+        status: PlayerIdentityStatus.initializing,
+      );
+    });
+    try {
+      await service.signInWithGoogle().timeout(const Duration(seconds: 45));
+    } on TimeoutException {
+      if (mounted) {
+        setState(() {
+          _identityState = const PlayerIdentitySnapshot(
+            status: PlayerIdentityStatus.unavailable,
+            failureCode: PlayerIdentityFailureCode.unavailable,
+          );
+          _message = 'Sign-in took too long. Check your connection and retry.';
+        });
+      }
+    } on PlayerIdentityException catch (error) {
+      if (mounted && error.code == PlayerIdentityFailureCode.canceled) {
+        setState(() {
+          _identityState = const PlayerIdentitySnapshot(
+            status: PlayerIdentityStatus.unauthenticated,
+            failureCode: PlayerIdentityFailureCode.canceled,
+          );
+          _message = 'Sign-in was canceled. Choose an account to continue.';
+        });
+      } else if (mounted) {
+        setState(() {
+          _identityState = const PlayerIdentitySnapshot(
+            status: PlayerIdentityStatus.unavailable,
+            failureCode: PlayerIdentityFailureCode.unavailable,
+          );
+          _message = 'Sign-in failed. Check your connection and try again.';
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _identityState = const PlayerIdentitySnapshot(
+            status: PlayerIdentityStatus.unavailable,
+            failureCode: PlayerIdentityFailureCode.unavailable,
+          );
+          _message = 'Sign-in failed. Check your connection and try again.';
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _requestInProgress = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_identityState.hasRecoverableIdentity) {
+      return OrbitGamePage(
+        audioController: widget.audioController,
+        identityService: _identityService,
+      );
+    }
+    if (_identityState.status == PlayerIdentityStatus.initializing ||
+        _creatingService ||
+        _requestInProgress) {
+      return const _AuthenticationLoadingScreen();
+    }
+    if (_identityState.status == PlayerIdentityStatus.unavailable) {
+      return _AuthenticationMessageScreen(
+        message:
+            _message ?? 'Sign-in is temporarily unavailable. Please try again.',
+        actionLabel: 'RETRY',
+        onAction: _retryAuthentication,
+        busy: false,
+      );
+    }
+    return _GoogleSignInScreen(
+      message: _message,
+      busy: false,
+      onSignIn: _retryAuthentication,
+    );
+  }
+}
+
+class _AuthenticationLoadingScreen extends StatelessWidget {
+  const _AuthenticationLoadingScreen();
+
+  @override
+  Widget build(BuildContext context) => const Scaffold(
+    body: Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _OrbitBrandMark(),
+          SizedBox(height: 28),
+          CircularProgressIndicator(),
+          SizedBox(height: 16),
+          Text('CHECKING YOUR ACCOUNT'),
+        ],
+      ),
+    ),
+  );
+}
+
+class _GoogleSignInScreen extends StatelessWidget {
+  const _GoogleSignInScreen({
+    required this.message,
+    required this.busy,
+    required this.onSignIn,
+  });
+
+  final String? message;
+  final bool busy;
+  final VoidCallback onSignIn;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    body: SafeArea(
+      child: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(28),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const _OrbitBrandMark(),
+                const SizedBox(height: 36),
+                const Text(
+                  'YOUR RUN STARTS HERE',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Color(0xff55e7ff),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 2.2,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Sign in to Orbit Dash',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Use your Google account to continue to the game.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Color(0xffa7b1c6), height: 1.5),
+                ),
+                if (message != null) ...[
+                  const SizedBox(height: 22),
+                  Text(
+                    message!,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Color(0xffffb4ab)),
+                  ),
+                ],
+                const SizedBox(height: 30),
+                SizedBox(
+                  width: double.infinity,
+                  height: 54,
+                  child: FilledButton.icon(
+                    onPressed: busy ? null : onSignIn,
+                    icon: const Icon(Icons.account_circle_outlined),
+                    label: Text(busy ? 'CONNECTING…' : 'CONTINUE WITH GOOGLE'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+class _AuthenticationMessageScreen extends StatelessWidget {
+  const _AuthenticationMessageScreen({
+    required this.message,
+    required this.actionLabel,
+    required this.onAction,
+    required this.busy,
+  });
+
+  final String message;
+  final String actionLabel;
+  final VoidCallback onAction;
+  final bool busy;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    body: SafeArea(
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const _OrbitBrandMark(),
+              const SizedBox(height: 28),
+              const Icon(
+                Icons.wifi_off_rounded,
+                size: 38,
+                color: Color(0xffffb4ab),
+              ),
+              const SizedBox(height: 16),
+              Text(message, textAlign: TextAlign.center),
+              const SizedBox(height: 24),
+              FilledButton(
+                onPressed: busy ? null : onAction,
+                child: Text(actionLabel),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+class _OrbitBrandMark extends StatelessWidget {
+  const _OrbitBrandMark();
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 78,
+    height: 78,
+    decoration: BoxDecoration(
+      shape: BoxShape.circle,
+      border: Border.all(color: const Color(0xff55e7ff), width: 2),
+      boxShadow: const [
+        BoxShadow(color: Color(0x3355e7ff), blurRadius: 24, spreadRadius: 3),
+      ],
+    ),
+    child: const Icon(Icons.blur_circular, color: Color(0xff55e7ff), size: 42),
   );
 }
 
@@ -1249,12 +1621,20 @@ class _OrbitGamePageState extends State<OrbitGamePage>
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.diamond_rounded, color: Color(0xffffd66e), size: 17),
+                  const Icon(
+                    Icons.diamond_rounded,
+                    color: Color(0xffffd66e),
+                    size: 17,
+                  ),
                   const SizedBox(width: 5),
                   Text(
                     '${_wallet.balance} G',
                     key: const ValueKey('main-menu-gem-balance'),
-                    style: const TextStyle(color: Color(0xffffd66e), fontSize: 12, fontWeight: FontWeight.w900),
+                    style: const TextStyle(
+                      color: Color(0xffffd66e),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
                 ],
               ),
@@ -1280,27 +1660,39 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                 onPressed: _openAchievements,
                 tooltip: 'Achievements',
                 visualDensity: VisualDensity.compact,
-                icon: const Icon(Icons.emoji_events_rounded, color: Color(0xffffd66e)),
+                icon: const Icon(
+                  Icons.emoji_events_rounded,
+                  color: Color(0xffffd66e),
+                ),
               ),
             if (_state == RunState.ready)
               IconButton(
                 onPressed: _openDailyChallenges,
                 tooltip: 'Daily challenges',
                 visualDensity: VisualDensity.compact,
-                icon: const Icon(Icons.calendar_today_rounded, color: Color(0xff65eaff)),
+                icon: const Icon(
+                  Icons.calendar_today_rounded,
+                  color: Color(0xff65eaff),
+                ),
               ),
             if (_state == RunState.ready) ...[
               IconButton(
                 onPressed: _openSkins,
                 tooltip: 'Cosmetic shop',
                 visualDensity: VisualDensity.compact,
-                icon: Icon(Icons.palette_rounded, color: _skinColor(_activeShipSkin)),
+                icon: Icon(
+                  Icons.palette_rounded,
+                  color: _skinColor(_activeShipSkin),
+                ),
               ),
               IconButton(
                 onPressed: _openStatistics,
                 tooltip: 'Player statistics',
                 visualDensity: VisualDensity.compact,
-                icon: const Icon(Icons.query_stats_rounded, color: Color(0xff65eaff)),
+                icon: const Icon(
+                  Icons.query_stats_rounded,
+                  color: Color(0xff65eaff),
+                ),
               ),
             ],
             if (_state != RunState.playing && constraints.maxWidth >= 400) ...[
@@ -1308,13 +1700,29 @@ class _OrbitGamePageState extends State<OrbitGamePage>
                 onPressed: _toggleMusic,
                 tooltip: _audio.musicEnabled ? 'Music on' : 'Music off',
                 visualDensity: VisualDensity.compact,
-                icon: Icon(_audio.musicEnabled ? Icons.music_note_rounded : Icons.music_off_rounded, color: _audio.musicEnabled ? const Color(0xff65eaff) : Colors.white38),
+                icon: Icon(
+                  _audio.musicEnabled
+                      ? Icons.music_note_rounded
+                      : Icons.music_off_rounded,
+                  color: _audio.musicEnabled
+                      ? const Color(0xff65eaff)
+                      : Colors.white38,
+                ),
               ),
               IconButton(
                 onPressed: _toggleEffects,
-                tooltip: _audio.effectsEnabled ? 'Sound effects on' : 'Sound effects off',
+                tooltip: _audio.effectsEnabled
+                    ? 'Sound effects on'
+                    : 'Sound effects off',
                 visualDensity: VisualDensity.compact,
-                icon: Icon(_audio.effectsEnabled ? Icons.volume_up_rounded : Icons.volume_off_rounded, color: _audio.effectsEnabled ? const Color(0xff65eaff) : Colors.white38),
+                icon: Icon(
+                  _audio.effectsEnabled
+                      ? Icons.volume_up_rounded
+                      : Icons.volume_off_rounded,
+                  color: _audio.effectsEnabled
+                      ? const Color(0xff65eaff)
+                      : Colors.white38,
+                ),
               ),
             ],
             if (_state == RunState.playing) ...[
@@ -4296,7 +4704,11 @@ Color _trailColor(TrailSkinId skin) => Color(trailVisualStyles[skin]!.color);
 Color _skinColor(ShipSkinId skin) => Color(shipVisualStyles[skin]!.color);
 
 class GemShopDialog extends StatefulWidget {
-  const GemShopDialog({super.key, required this.balance, this.service = const UnavailableGemPurchaseService()});
+  const GemShopDialog({
+    super.key,
+    required this.balance,
+    this.service = const UnavailableGemPurchaseService(),
+  });
 
   final int balance;
   final GemPurchaseService service;
@@ -4312,13 +4724,18 @@ class _GemShopDialogState extends State<GemShopDialog> {
 
   Future<void> _purchase(GemPackage package) async {
     if (_pending) return;
-    setState(() { _pending = true; _message = null; });
+    setState(() {
+      _pending = true;
+      _message = null;
+    });
     try {
       final result = await widget.service.purchase(package);
       if (!mounted) return;
-      setState(() => _message = result.status == GemPurchaseStatus.unavailable
-          ? 'Purchases are coming soon. Your Gem balance has not changed.'
-          : 'Purchase could not be completed.');
+      setState(
+        () => _message = result.status == GemPurchaseStatus.unavailable
+            ? 'Purchases are coming soon. Your Gem balance has not changed.'
+            : 'Purchase could not be completed.',
+      );
     } catch (_) {
       if (mounted) {
         setState(
@@ -4339,19 +4756,57 @@ class _GemShopDialogState extends State<GemShopDialog> {
       constraints: const BoxConstraints(maxWidth: 470, maxHeight: 680),
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Icon(Icons.diamond_rounded, color: Color(0xffffd66e), size: 34),
-          const SizedBox(height: 6),
-          const Text('GEM SHOP', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, letterSpacing: 2)),
-          const SizedBox(height: 5),
-          Text('YOUR BALANCE  ${widget.balance} G', key: const ValueKey('gem-shop-balance'), style: const TextStyle(color: Color(0xffffd66e), fontWeight: FontWeight.w800)),
-          const SizedBox(height: 14),
-          for (final package in [...gemPackages]..sort((a, b) => a.displayOrder.compareTo(b.displayOrder)))
-            _packageTile(package),
-          if (_message != null) Padding(padding: const EdgeInsets.only(top: 10), child: Text(_message!, key: const ValueKey('gem-purchase-message'), textAlign: TextAlign.center, style: const TextStyle(color: Color(0xff65eaff), fontSize: 12))),
-          const SizedBox(height: 10),
-          TextButton(onPressed: _pending ? null : () => Navigator.of(context).pop(), child: const Text('CLOSE')),
-        ]),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.diamond_rounded,
+              color: Color(0xffffd66e),
+              size: 34,
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'GEM SHOP',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 2,
+              ),
+            ),
+            const SizedBox(height: 5),
+            Text(
+              'YOUR BALANCE  ${widget.balance} G',
+              key: const ValueKey('gem-shop-balance'),
+              style: const TextStyle(
+                color: Color(0xffffd66e),
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 14),
+            for (final package in [
+              ...gemPackages,
+            ]..sort((a, b) => a.displayOrder.compareTo(b.displayOrder)))
+              _packageTile(package),
+            if (_message != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: Text(
+                  _message!,
+                  key: const ValueKey('gem-purchase-message'),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Color(0xff65eaff),
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            const SizedBox(height: 10),
+            TextButton(
+              onPressed: _pending ? null : () => Navigator.of(context).pop(),
+              child: const Text('CLOSE'),
+            ),
+          ],
+        ),
       ),
     ),
   );
@@ -4360,26 +4815,89 @@ class _GemShopDialogState extends State<GemShopDialog> {
     final selected = package.id == _selectedId;
     return InkWell(
       key: ValueKey('gem-package-${package.id}'),
-      onTap: _pending ? null : () => setState(() { _selectedId = package.id; _message = null; }),
+      onTap: _pending
+          ? null
+          : () => setState(() {
+              _selectedId = package.id;
+              _message = null;
+            }),
       borderRadius: BorderRadius.circular(14),
       child: Container(
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(color: selected ? const Color(0x3328c9e8) : const Color(0xff1b263c), borderRadius: BorderRadius.circular(14), border: Border.all(color: package.featured ? const Color(0xffffd66e) : selected ? const Color(0xff65eaff) : const Color(0xff34435e))),
-        child: Row(children: [
-          const Icon(Icons.diamond_rounded, color: Color(0xffffd66e)),
-          const SizedBox(width: 10),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('${package.totalGems} GEMS', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
-            if (package.bonusGems > 0) Text('${package.gems} + ${package.bonusGems} BONUS', style: const TextStyle(color: Color(0xff65eaff), fontSize: 10, fontWeight: FontWeight.w700)),
-            if (package.featured) const Text('BEST VALUE', style: TextStyle(color: Color(0xffffd66e), fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 1)),
-          ])),
-          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-            Text(package.displayPrice ?? '—', style: const TextStyle(color: Color(0xffaebbd2), fontSize: 10)),
-            const SizedBox(height: 4),
-            FilledButton(onPressed: _pending ? null : () => _purchase(package), child: _pending ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('NOT AVAILABLE')),
-          ]),
-        ]),
+        decoration: BoxDecoration(
+          color: selected ? const Color(0x3328c9e8) : const Color(0xff1b263c),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: package.featured
+                ? const Color(0xffffd66e)
+                : selected
+                ? const Color(0xff65eaff)
+                : const Color(0xff34435e),
+          ),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.diamond_rounded, color: Color(0xffffd66e)),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${package.totalGems} GEMS',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w900,
+                      fontSize: 15,
+                    ),
+                  ),
+                  if (package.bonusGems > 0)
+                    Text(
+                      '${package.gems} + ${package.bonusGems} BONUS',
+                      style: const TextStyle(
+                        color: Color(0xff65eaff),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  if (package.featured)
+                    const Text(
+                      'BEST VALUE',
+                      style: TextStyle(
+                        color: Color(0xffffd66e),
+                        fontSize: 9,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  package.displayPrice ?? '—',
+                  style: const TextStyle(
+                    color: Color(0xffaebbd2),
+                    fontSize: 10,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                FilledButton(
+                  onPressed: _pending ? null : () => _purchase(package),
+                  child: _pending
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('NOT AVAILABLE'),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
