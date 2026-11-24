@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "252504485252",
+    "project_id": "orbit-dash-75426",
+    "storage_bucket": "orbit-dash-75426.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:252504485252:android:8226d3c6f411566b26c1d1",
+        "android_client_info": {
+          "package_name": "com.example.orbit_dash"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "252504485252-h7a9p4dob24eog4tnlci92il8abr5bec.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.orbit_dash",
+            "certificate_hash": "5ceb69e07c7e3a333760c7ceb84fcbc15d2e2b42"
+          }
+        },
+        {
+          "client_id": "252504485252-get7e2589n0m7pm26enei55q8s7hrj6t.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBDi4Bze14EnzHoAIguM-YqguXphqWBJVs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "252504485252-get7e2589n0m7pm26enei55q8s7hrj6t.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "252504485252-rd47bdplu7kh24cu2ska39qvsbieo9i7.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.orbitDash"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

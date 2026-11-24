@@ -4,8 +4,10 @@ import 'dart:math' as math;
 import 'package:orbit_dash/achievements.dart';
 import 'package:orbit_dash/audio/game_audio_manager.dart';
 import 'package:orbit_dash/daily_challenges.dart';
+import 'package:orbit_dash/firebase_player_identity.dart';
 import 'package:orbit_dash/gem_wallet.dart';
 import 'package:orbit_dash/gem_shop.dart';
+import 'package:orbit_dash/player_identity.dart';
 import 'package:orbit_dash/player_statistics.dart';
 import 'package:orbit_dash/skins.dart';
 import 'package:flutter/foundation.dart';
@@ -21,12 +23,18 @@ Color _cosmeticRarityColor(CosmeticRarity rarity) => switch (rarity) {
   CosmeticRarity.legendary => const Color(0xFFF59E0B),
 };
 
-void main() => runApp(const OrbitDashApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final identityService = await createFirebasePlayerIdentityService();
+  runApp(OrbitDashApp(identityService: identityService));
+  unawaited(identityService.initialize());
+}
 
 class OrbitDashApp extends StatelessWidget {
-  const OrbitDashApp({super.key, this.audioController});
+  const OrbitDashApp({super.key, this.audioController, this.identityService});
 
   final GameAudioController? audioController;
+  final PlayerIdentityService? identityService;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -36,7 +44,10 @@ class OrbitDashApp extends StatelessWidget {
       scaffoldBackgroundColor: const Color(0xff070b18),
       colorScheme: const ColorScheme.dark(primary: Color(0xff55e7ff)),
     ),
-    home: OrbitGamePage(audioController: audioController),
+    home: OrbitGamePage(
+      audioController: audioController,
+      identityService: identityService,
+    ),
   );
 }
 
@@ -361,12 +372,14 @@ class OrbitGamePage extends StatefulWidget {
   const OrbitGamePage({
     super.key,
     this.audioController,
+    this.identityService,
     this.testDriver,
     this.dailyChallengesNow,
     this.orbitUnlockNotificationDuration = const Duration(milliseconds: 2000),
   });
 
   final GameAudioController? audioController;
+  final PlayerIdentityService? identityService;
   final OrbitGameTestDriver? testDriver;
   final DateTime Function()? dailyChallengesNow;
   final Duration orbitUnlockNotificationDuration;
@@ -4307,7 +4320,12 @@ class _GemShopDialogState extends State<GemShopDialog> {
           ? 'Purchases are coming soon. Your Gem balance has not changed.'
           : 'Purchase could not be completed.');
     } catch (_) {
-      if (mounted) setState(() => _message = 'Purchase could not be completed. Please try again later.');
+      if (mounted) {
+        setState(
+          () => _message =
+              'Purchase could not be completed. Please try again later.',
+        );
+      }
     } finally {
       if (mounted) setState(() => _pending = false);
     }

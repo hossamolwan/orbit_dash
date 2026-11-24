@@ -62,6 +62,10 @@ app.*.map.json
 *.pfx
 *.jks
 *.keystore
+# Firebase Admin SDK private keys are server credentials, never app config.
+**/serviceAccountKey.json
+**/service-account*.json
+**/*-firebase-adminsdk-*.json
 
 # Common generated and dependency directories
 node_modules/
