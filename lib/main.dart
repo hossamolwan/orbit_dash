@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:orbit_dash/achievements.dart';
 import 'package:orbit_dash/audio/game_audio_manager.dart';
 import 'package:orbit_dash/daily_challenges.dart';
+import 'package:orbit_dash/data/player/player_lifecycle_coordinator.dart';
 import 'package:orbit_dash/firebase_player_identity.dart';
 import 'package:orbit_dash/gem_wallet.dart';
 import 'package:orbit_dash/gem_shop.dart';
@@ -34,11 +35,14 @@ class OrbitDashApp extends StatelessWidget {
     this.audioController,
     this.identityService,
     this.identityServiceFactory,
+    this.playerLifecycleCoordinatorFactory,
   });
 
   final GameAudioController? audioController;
   final PlayerIdentityService? identityService;
   final Future<PlayerIdentityService> Function()? identityServiceFactory;
+  final PlayerLifecycleCoordinator Function(PlayerIdentityService service)?
+  playerLifecycleCoordinatorFactory;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -53,6 +57,7 @@ class OrbitDashApp extends StatelessWidget {
       identityService: identityService,
       identityServiceFactory:
           identityServiceFactory ?? createFirebasePlayerIdentityService,
+      playerLifecycleCoordinatorFactory: playerLifecycleCoordinatorFactory,
     ),
   );
 }
@@ -63,11 +68,14 @@ class PlayerAuthenticationGate extends StatefulWidget {
     required this.audioController,
     required this.identityServiceFactory,
     this.identityService,
+    this.playerLifecycleCoordinatorFactory,
   });
 
   final GameAudioController? audioController;
   final PlayerIdentityService? identityService;
   final Future<PlayerIdentityService> Function() identityServiceFactory;
+  final PlayerLifecycleCoordinator Function(PlayerIdentityService service)?
+  playerLifecycleCoordinatorFactory;
 
   @override
   State<PlayerAuthenticationGate> createState() =>
@@ -77,10 +85,15 @@ class PlayerAuthenticationGate extends StatefulWidget {
 class _PlayerAuthenticationGateState extends State<PlayerAuthenticationGate> {
   PlayerIdentityService? _identityService;
   StreamSubscription<PlayerIdentitySnapshot>? _identitySubscription;
+  PlayerLifecycleCoordinator? _playerLifecycleCoordinator;
+  StreamSubscription<PlayerLifecycleState>? _playerLifecycleSubscription;
   PlayerIdentitySnapshot _identityState = const PlayerIdentitySnapshot(
     status: PlayerIdentityStatus.initializing,
   );
+  PlayerLifecycleState _playerLifecycleState =
+      const PlayerLifecycleState.initializingIdentity();
   bool _requestInProgress = false;
+  bool _playerRetryInProgress = false;
   bool _creatingService = false;
   String? _message;
 
@@ -98,6 +111,8 @@ class _PlayerAuthenticationGateState extends State<PlayerAuthenticationGate> {
   @override
   void dispose() {
     unawaited(_identitySubscription?.cancel());
+    unawaited(_playerLifecycleSubscription?.cancel());
+    unawaited(_playerLifecycleCoordinator?.dispose());
     super.dispose();
   }
 
@@ -130,14 +145,26 @@ class _PlayerAuthenticationGateState extends State<PlayerAuthenticationGate> {
   }
 
   void _attachService(PlayerIdentityService service) {
+    if (identical(service, _identityService) &&
+        _playerLifecycleCoordinator != null) {
+      return;
+    }
     unawaited(_identitySubscription?.cancel());
+    unawaited(_playerLifecycleSubscription?.cancel());
+    unawaited(_playerLifecycleCoordinator?.dispose());
+    final coordinator =
+        widget.playerLifecycleCoordinatorFactory?.call(service) ??
+        PlayerLifecycleCoordinator(identityService: service);
     setState(() {
       _identityService = service;
       _identityState = service.state;
+      _playerLifecycleCoordinator = coordinator;
+      _playerLifecycleState = coordinator.state;
+      _playerRetryInProgress = false;
       _message = null;
     });
     _identitySubscription = service.states.listen((state) {
-      if (!mounted) return;
+      if (!mounted || !identical(service, _identityService)) return;
       setState(() {
         _identityState = state;
         if (state.status == PlayerIdentityStatus.authenticated) {
@@ -146,9 +173,20 @@ class _PlayerAuthenticationGateState extends State<PlayerAuthenticationGate> {
           _message = 'Sign-in was canceled. Choose an account to continue.';
         } else if (state.status == PlayerIdentityStatus.unavailable) {
           _message = 'Sign-in is temporarily unavailable. Please try again.';
+        } else if (state.status == PlayerIdentityStatus.unauthenticated) {
+          _message = state.failureCode == PlayerIdentityFailureCode.canceled
+              ? 'Sign-in was canceled. Choose an account to continue.'
+              : null;
         }
       });
     });
+    _playerLifecycleSubscription = coordinator.states.listen((state) {
+      if (!mounted || !identical(coordinator, _playerLifecycleCoordinator)) {
+        return;
+      }
+      setState(() => _playerLifecycleState = state);
+    });
+    unawaited(coordinator.start());
     unawaited(_initializeService(service));
   }
 
@@ -174,6 +212,20 @@ class _PlayerAuthenticationGateState extends State<PlayerAuthenticationGate> {
           );
           _message = 'Sign-in is temporarily unavailable. Please try again.';
         });
+      }
+    }
+  }
+
+  Future<void> _retryPlayerLifecycle() async {
+    if (_playerRetryInProgress) return;
+    final coordinator = _playerLifecycleCoordinator;
+    if (coordinator == null) return;
+    setState(() => _playerRetryInProgress = true);
+    try {
+      await coordinator.retry();
+    } finally {
+      if (mounted && identical(coordinator, _playerLifecycleCoordinator)) {
+        setState(() => _playerRetryInProgress = false);
       }
     }
   }
@@ -241,9 +293,31 @@ class _PlayerAuthenticationGateState extends State<PlayerAuthenticationGate> {
   @override
   Widget build(BuildContext context) {
     if (_identityState.hasRecoverableIdentity) {
-      return OrbitGamePage(
-        audioController: widget.audioController,
-        identityService: _identityService,
+      final identity = _identityState.requireRecoverableIdentity();
+      final lifecycle = _playerLifecycleState;
+      if (lifecycle.phase == PlayerLifecyclePhase.ready &&
+          lifecycle.session?.identity.id == identity.id) {
+        return OrbitGamePage(
+          key: ValueKey<String>(identity.id),
+          audioController: widget.audioController,
+          identityService: _identityService,
+        );
+      }
+      if (lifecycle.phase == PlayerLifecyclePhase.failed) {
+        return _lifecycleFailureScreen(lifecycle.failure!);
+      }
+      return _PlayerLifecycleLoadingScreen(
+        message: _lifecycleLoadingMessage(lifecycle.phase),
+      );
+    }
+    if (_playerLifecycleState.failure?.stage ==
+            PlayerLifecycleStage.identityInitialization &&
+        _identityState.status == PlayerIdentityStatus.initializing) {
+      return _AuthenticationMessageScreen(
+        message: 'We could not verify your Google account. Please try again.',
+        actionLabel: 'RETRY',
+        onAction: _retryAuthentication,
+        busy: _requestInProgress,
       );
     }
     if (_identityState.status == PlayerIdentityStatus.initializing ||
@@ -266,6 +340,67 @@ class _PlayerAuthenticationGateState extends State<PlayerAuthenticationGate> {
       onSignIn: _retryAuthentication,
     );
   }
+
+  String _lifecycleLoadingMessage(PlayerLifecyclePhase phase) =>
+      switch (phase) {
+        PlayerLifecyclePhase.initializingIdentity => 'CHECKING YOUR ACCOUNT',
+        PlayerLifecyclePhase.loadingProfile => 'LOADING YOUR PILOT PROFILE',
+        PlayerLifecyclePhase.creatingProfile => 'SETTING UP YOUR PILOT PROFILE',
+        PlayerLifecyclePhase.loadingPlayerData => 'SYNCING YOUR PLAYER DATA',
+        PlayerLifecyclePhase.unauthenticated => 'WAITING FOR GOOGLE SIGN-IN',
+        PlayerLifecyclePhase.ready => 'PREPARING YOUR SESSION',
+        PlayerLifecyclePhase.failed => 'PLAYER DATA NEEDS ATTENTION',
+        PlayerLifecyclePhase.disposed => 'PLAYER SESSION CLOSED',
+      };
+
+  Widget _lifecycleFailureScreen(PlayerLifecycleFailure failure) {
+    final identityFailure =
+        failure.stage == PlayerLifecycleStage.identityInitialization;
+    return _AuthenticationMessageScreen(
+      message: identityFailure
+          ? 'We could not verify your Google account. Please try again.'
+          : 'We could not load your player data. Check your connection and retry.',
+      actionLabel: 'RETRY',
+      onAction: identityFailure ? _retryAuthentication : _retryPlayerLifecycle,
+      busy: identityFailure ? _requestInProgress : _playerRetryInProgress,
+    );
+  }
+}
+
+class _PlayerLifecycleLoadingScreen extends StatelessWidget {
+  const _PlayerLifecycleLoadingScreen({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    body: SafeArea(
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const _OrbitBrandMark(),
+            const SizedBox(height: 28),
+            const SizedBox(
+              width: 30,
+              height: 30,
+              child: CircularProgressIndicator(strokeWidth: 3),
+            ),
+            const SizedBox(height: 18),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Color(0xffa7b1c6),
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.2,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 }
 
 class _AuthenticationLoadingScreen extends StatelessWidget {
