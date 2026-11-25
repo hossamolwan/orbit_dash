@@ -3,6 +3,8 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'account_scoped_preferences.dart';
+
 enum DailyChallengeEvent {
   gemCollected,
   runStarted,
@@ -74,15 +76,18 @@ const dailyChallengePool = <DailyChallengeDefinition>[
 /// Bonus gems are deliberately separate from physical pickup totals.
 class DailyChallengeStore {
   DailyChallengeStore({
+    String playerId = AccountScopedPreferences.localPlayerId,
     Future<SharedPreferences> Function()? loadPreferences,
     DateTime Function()? now,
     this._writeString,
-  }) : _loadPreferences = loadPreferences ?? SharedPreferences.getInstance,
+  }) : _keys = AccountScopedPreferences(playerId),
+       _loadPreferences = loadPreferences ?? SharedPreferences.getInstance,
        _now = now ?? DateTime.now;
 
   static const stateKey = 'orbit_dash_daily_challenges_v1';
 
   final Future<SharedPreferences> Function() _loadPreferences;
+  final AccountScopedPreferences _keys;
   final DateTime Function() _now;
   final Future<bool> Function(SharedPreferences, String, String)? _writeString;
   List<DailyChallenge> _challenges = const [];
@@ -240,8 +245,8 @@ class DailyChallengeStore {
       },
     });
     final saved =
-        await (_writeString?.call(preferences, stateKey, value) ??
-            preferences.setString(stateKey, value));
+        await (_writeString?.call(preferences, _keys.key(stateKey), value) ??
+            preferences.setString(_keys.key(stateKey), value));
     if (!saved) throw StateError('Daily challenge save was not confirmed.');
   }
 
@@ -297,7 +302,7 @@ class DailyChallengeStore {
 
   String? _readRawState(SharedPreferences preferences) {
     try {
-      return preferences.getString(stateKey);
+      return preferences.getString(_keys.key(stateKey));
     } on TypeError {
       return null;
     }

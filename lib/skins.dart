@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'account_scoped_preferences.dart';
+
 enum CosmeticCategory { ship, orbit, core, trail }
 
 enum CosmeticRarity { free, common, rare, epic, legendary }
@@ -888,13 +890,17 @@ const coreSkins = <CoreSkin>[
 
 /// Stores appearance selections independently from wallet ownership.
 class AppearanceStore {
-  AppearanceStore({Future<SharedPreferences> Function()? loadPreferences})
-    : _loadPreferences = loadPreferences ?? SharedPreferences.getInstance;
+  AppearanceStore({
+    String playerId = AccountScopedPreferences.localPlayerId,
+    Future<SharedPreferences> Function()? loadPreferences,
+  }) : _keys = AccountScopedPreferences(playerId),
+       _loadPreferences = loadPreferences ?? SharedPreferences.getInstance;
 
   static const selectedOrbitKey = 'orbit_dash_selected_orbit_v1';
   static const selectedCoreKey = 'orbit_dash_selected_core_v1';
   static const selectedTrailKey = 'orbit_dash_selected_trail_v1';
   final Future<SharedPreferences> Function() _loadPreferences;
+  final AccountScopedPreferences _keys;
   OrbitSkinId _selectedOrbit = OrbitSkinId.defaultOrbit;
   CoreSkinId _selectedCore = CoreSkinId.defaultCore;
   TrailSkinId _selectedTrail = TrailSkinId.classic;
@@ -908,9 +914,9 @@ class AppearanceStore {
   Future<void> load({Set<String> ownedItemIds = const {}}) =>
       _serialize(() async {
         final prefs = await _loadPreferences();
-        final orbitValue = _readString(prefs, selectedOrbitKey);
-        final coreValue = _readString(prefs, selectedCoreKey);
-        final trailValue = _readString(prefs, selectedTrailKey);
+        final orbitValue = _readString(prefs, _keys.key(selectedOrbitKey));
+        final coreValue = _readString(prefs, _keys.key(selectedCoreKey));
+        final trailValue = _readString(prefs, _keys.key(selectedTrailKey));
         final orbit = OrbitSkinId.values
             .where((id) => id.name == orbitValue)
             .firstOrNull;
@@ -939,13 +945,13 @@ class AppearanceStore {
             ? trail
             : TrailSkinId.classic;
         if (_selectedOrbit.name != orbitValue) {
-          await _save(prefs, selectedOrbitKey, _selectedOrbit.name);
+          await _save(prefs, _keys.key(selectedOrbitKey), _selectedOrbit.name);
         }
         if (_selectedCore.name != coreValue) {
-          await _save(prefs, selectedCoreKey, _selectedCore.name);
+          await _save(prefs, _keys.key(selectedCoreKey), _selectedCore.name);
         }
         if (_selectedTrail.name != trailValue) {
-          await _save(prefs, selectedTrailKey, _selectedTrail.name);
+          await _save(prefs, _keys.key(selectedTrailKey), _selectedTrail.name);
         }
       });
 
@@ -957,7 +963,7 @@ class AppearanceStore {
       return false;
     }
     final prefs = await _loadPreferences();
-    await _save(prefs, selectedOrbitKey, id.name);
+    await _save(prefs, _keys.key(selectedOrbitKey), id.name);
     _selectedOrbit = id;
     return true;
   });
@@ -968,7 +974,7 @@ class AppearanceStore {
           return false;
         }
         final prefs = await _loadPreferences();
-        await _save(prefs, selectedCoreKey, id.name);
+        await _save(prefs, _keys.key(selectedCoreKey), id.name);
         _selectedCore = id;
         return true;
       });
@@ -982,7 +988,7 @@ class AppearanceStore {
       return false;
     }
     final prefs = await _loadPreferences();
-    await _save(prefs, selectedTrailKey, id.name);
+    await _save(prefs, _keys.key(selectedTrailKey), id.name);
     _selectedTrail = id;
     return true;
   });
@@ -1015,12 +1021,16 @@ class AppearanceStore {
 }
 
 class SkinStore {
-  SkinStore({Future<SharedPreferences> Function()? loadPreferences})
-    : _loadPreferences = loadPreferences ?? SharedPreferences.getInstance;
+  SkinStore({
+    String playerId = AccountScopedPreferences.localPlayerId,
+    Future<SharedPreferences> Function()? loadPreferences,
+  }) : _keys = AccountScopedPreferences(playerId),
+       _loadPreferences = loadPreferences ?? SharedPreferences.getInstance;
 
   // Versioned keys intentionally ignore historical unlock and selection data.
   static const selectedSkinKey = 'orbit_dash_selected_skin_v2';
   final Future<SharedPreferences> Function() _loadPreferences;
+  final AccountScopedPreferences _keys;
   ShipSkinId _selected = ShipSkinId.defaultSkin;
   Future<void> _tail = Future<void>.value();
   ShipSkinId get selectedSkin => _selected;
@@ -1031,7 +1041,7 @@ class SkinStore {
         final prefs = await _loadPreferences();
         String? value;
         try {
-          value = prefs.getString(selectedSkinKey);
+          value = prefs.getString(_keys.key(selectedSkinKey));
         } on TypeError {
           // Treat malformed selection data as an unequipped item.
         }
@@ -1043,7 +1053,10 @@ class SkinStore {
             ? id
             : ShipSkinId.defaultSkin;
         if (_selected.name != value) {
-          final saved = await prefs.setString(selectedSkinKey, _selected.name);
+          final saved = await prefs.setString(
+            _keys.key(selectedSkinKey),
+            _selected.name,
+          );
           if (!saved) throw StateError('Skin selection was not persisted.');
         }
       });
@@ -1052,7 +1065,10 @@ class SkinStore {
       _serialize(() async {
         if (!ownedItemIds.contains('ship.${id.name}')) return false;
         final prefs = await _loadPreferences();
-        final saved = await prefs.setString(selectedSkinKey, id.name);
+        final saved = await prefs.setString(
+          _keys.key(selectedSkinKey),
+          id.name,
+        );
         if (!saved) throw StateError('Skin selection was not persisted.');
         _selected = id;
         return true;

@@ -5,6 +5,7 @@ import 'package:orbit_dash/achievements.dart';
 import 'package:orbit_dash/daily_challenges.dart';
 import 'package:orbit_dash/gem_wallet.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:orbit_dash/account_scoped_preferences.dart';
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
@@ -85,7 +86,12 @@ void main() {
       expect(await restored.claimReward(challenge.definition.id), isNull);
       expect(restored.bonusGemsGranted, reward);
       final prefs = await SharedPreferences.getInstance();
-      expect(prefs.getInt(AchievementStore.totalGemsKey), isNull);
+      expect(
+        prefs.getInt(
+          AccountScopedPreferences.localKey(AchievementStore.totalGemsKey),
+        ),
+        isNull,
+      );
     });
 
     test(
@@ -157,7 +163,11 @@ void main() {
         final challengeStore = DailyChallengeStore(
           now: now,
           writeString: (preferences, key, value) async {
-            if (key == DailyChallengeStore.stateKey && failNextClaimSave) {
+            if (key ==
+                    AccountScopedPreferences.localKey(
+                      DailyChallengeStore.stateKey,
+                    ) &&
+                failNextClaimSave) {
               final data = jsonDecode(value) as Map<String, dynamic>;
               final states = data['challenges'] as Map<String, dynamic>;
               if (states.values.any(
@@ -229,9 +239,9 @@ void main() {
       'invalid daily values fall back without changing unrelated data',
       () async {
         SharedPreferences.setMockInitialValues({
-          DailyChallengeStore.stateKey: 42,
+          AccountScopedPreferences.localKey(DailyChallengeStore.stateKey): 42,
           'orbit_dash_unlocked_stage': 4,
-          AchievementStore.totalGemsKey: 9,
+          AccountScopedPreferences.localKey(AchievementStore.totalGemsKey): 9,
         });
         final store = DailyChallengeStore(now: () => DateTime(2026, 10, 17));
         await store.load();
@@ -243,7 +253,12 @@ void main() {
         expect(store.bonusGemsGranted, 0);
         final prefs = await SharedPreferences.getInstance();
         expect(prefs.getInt('orbit_dash_unlocked_stage'), 4);
-        expect(prefs.getInt(AchievementStore.totalGemsKey), 9);
+        expect(
+          prefs.getInt(
+            AccountScopedPreferences.localKey(AchievementStore.totalGemsKey),
+          ),
+          9,
+        );
       },
     );
   });

@@ -3,17 +3,23 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'account_scoped_preferences.dart';
+
 /// Persistent local spendable currency and idempotency ledger.
 /// Future real-money grants must be verified by a trusted backend.
 class GemWallet {
-  GemWallet({Future<SharedPreferences> Function()? loadPreferences})
-    : _loadPreferences = loadPreferences ?? SharedPreferences.getInstance;
+  GemWallet({
+    String playerId = AccountScopedPreferences.localPlayerId,
+    Future<SharedPreferences> Function()? loadPreferences,
+  }) : _keys = AccountScopedPreferences(playerId),
+       _loadPreferences = loadPreferences ?? SharedPreferences.getInstance;
 
   static const stateKey = 'orbit_dash_gem_wallet_v1';
   static const maxBalance = 1 << 31;
   static const maxRecentPickupIds = 256;
 
   final Future<SharedPreferences> Function() _loadPreferences;
+  final AccountScopedPreferences _keys;
   int _balance = 0;
   final Set<String> _recentPickupIds = {};
   final Set<String> _dailyRewardIds = {};
@@ -171,7 +177,7 @@ class GemWallet {
 
   String? _readRaw(SharedPreferences prefs) {
     try {
-      return prefs.getString(stateKey);
+      return prefs.getString(_keys.key(stateKey));
     } on TypeError {
       return null;
     }
@@ -249,7 +255,7 @@ class GemWallet {
     Map<String, int> purchases,
   ) async {
     final ok = await prefs.setString(
-      stateKey,
+      _keys.key(stateKey),
       jsonEncode({
         'version': 2,
         'balance': balance,

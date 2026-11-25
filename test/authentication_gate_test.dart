@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:orbit_dash/data/player/player_lifecycle_coordinator.dart';
 import 'package:orbit_dash/data/player/player_repository.dart';
+import 'package:orbit_dash/account_scoped_preferences.dart';
+import 'package:orbit_dash/gem_wallet.dart';
 import 'package:orbit_dash/main.dart';
 import 'package:orbit_dash/player_identity.dart';
 import 'package:orbit_dash/player_models.dart';
@@ -195,6 +197,33 @@ void main() {
     bProfile.complete(_profile('player-b'));
     await _pumpFrames(tester);
     expect(find.byKey(const ValueKey<String>('player-b')), findsOneWidget);
+  });
+
+  testWidgets('gameplay stores use the authenticated UID namespace', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      AccountScopedPreferences.keyFor('player-a', GemWallet.stateKey): '{"version":2,"balance":23,"dailyRewardDate":null,"dailyRewardIds":[],"purchases":{}}',
+      AccountScopedPreferences.keyFor('player-b', GemWallet.stateKey): '{"version":2,"balance":91,"dailyRewardDate":null,"dailyRewardIds":[],"purchases":{}}',
+    });
+    final service = _authenticatedService('player-a');
+    await tester.pumpWidget(_testApp(service));
+    await _pumpFrames(tester);
+    expect(
+      tester
+          .widget<Text>(find.byKey(const ValueKey('main-menu-gem-balance')))
+          .data,
+      '23 G',
+    );
+
+    service.emit(_authenticated('player-b'));
+    await _pumpFrames(tester);
+    expect(
+      tester
+          .widget<Text>(find.byKey(const ValueKey('main-menu-gem-balance')))
+          .data,
+      '91 G',
+    );
   });
 
   testWidgets(

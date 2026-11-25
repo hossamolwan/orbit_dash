@@ -6,6 +6,7 @@ import 'package:orbit_dash/main.dart';
 import 'package:orbit_dash/gem_wallet.dart';
 import 'package:orbit_dash/skins.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:orbit_dash/account_scoped_preferences.dart';
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
@@ -14,8 +15,8 @@ void main() {
     tester,
   ) async {
     SharedPreferences.setMockInitialValues({
-      AchievementStore.totalGemsKey: 25,
-      GemWallet.stateKey:
+      AccountScopedPreferences.localKey(AchievementStore.totalGemsKey): 25,
+      AccountScopedPreferences.localKey(GemWallet.stateKey):
           '{"version":1,"balance":40,"grants":[],"purchases":{}}',
       'orbit_dash_best': 7,
     });
@@ -61,7 +62,9 @@ void main() {
     expect(driver.selectedSkin, ShipSkinId.emerald);
     expect(
       SharedPreferences.getInstance().then(
-        (preferences) => preferences.getString(SkinStore.selectedSkinKey),
+        (preferences) => preferences.getString(
+          AccountScopedPreferences.localKey(SkinStore.selectedSkinKey),
+        ),
       ),
       completion(ShipSkinId.emerald.name),
     );

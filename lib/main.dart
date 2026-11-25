@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:orbit_dash/achievements.dart';
+import 'package:orbit_dash/account_scoped_preferences.dart';
 import 'package:orbit_dash/audio/game_audio_manager.dart';
 import 'package:orbit_dash/daily_challenges.dart';
 import 'package:orbit_dash/data/player/player_lifecycle_coordinator.dart';
@@ -911,10 +912,11 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   int _orbitUnlockNotificationGeneration = 0;
   bool _newRecord = false;
   static const _survivalBestKey = 'orbit_dash_survival_best';
-  final PlayerStatisticsStore _statisticsStore = PlayerStatisticsStore();
-  final SkinStore _skinStore = SkinStore();
-  final AppearanceStore _appearanceStore = AppearanceStore();
-  final GemWallet _wallet = GemWallet();
+  late final String _playerId;
+  late final PlayerStatisticsStore _statisticsStore;
+  late final SkinStore _skinStore;
+  late final AppearanceStore _appearanceStore;
+  late final GemWallet _wallet;
   bool get _debugCosmeticTestingEnabled => isDebugCosmeticTestingEnabled(
     isDebugBuild: kDebugMode,
     requested: _debugCosmeticTestingRequested,
@@ -950,9 +952,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   bool _featureStoresLoaded = false;
   bool _featureStoreLoadFailed = false;
   late Future<void> _featureStoresReady;
-  late final AchievementStore _achievementStore = AchievementStore(
-    loadPreferences: widget.testDriver?.achievementPreferencesLoader,
-  );
+  late final AchievementStore _achievementStore;
   Future<void> _achievementUpdates = Future<void>.value();
   Future<void> _pendingFeatureWrites = Future<void>.value();
   final List<_FeatureWriteFailure> _featureWriteFailures = [];
@@ -975,8 +975,23 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    final identity = widget.identityService?.state.identity;
+    _playerId = identity?.id.isNotEmpty == true
+        ? identity!.id
+        : AccountScopedPreferences.localPlayerId;
+    _statisticsStore = PlayerStatisticsStore(playerId: _playerId);
+    _skinStore = SkinStore(playerId: _playerId);
+    _appearanceStore = AppearanceStore(playerId: _playerId);
+    _wallet = GemWallet(playerId: _playerId);
+    _achievementStore = AchievementStore(
+      playerId: _playerId,
+      loadPreferences: widget.testDriver?.achievementPreferencesLoader,
+    );
     _audio = widget.audioController ?? GameAudioManager();
-    _dailyChallengeStore = DailyChallengeStore(now: widget.dailyChallengesNow);
+    _dailyChallengeStore = DailyChallengeStore(
+      playerId: _playerId,
+      now: widget.dailyChallengesNow,
+    );
     _audio.addListener(_audioSettingsChanged);
     unawaited(
       _audio.initialize().then((_) {
@@ -1024,7 +1039,15 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     _featureStoresReady = _loadFeatureStores();
     unawaited(_featureStoresReady);
     SharedPreferences.getInstance().then((prefs) {
-      if (mounted) setState(() => _best = prefs.getInt(_survivalBestKey) ?? 0);
+      if (mounted) {
+        setState(
+          () => _best =
+              prefs.getInt(
+                AccountScopedPreferences.keyFor(_playerId, _survivalBestKey),
+              ) ??
+              0,
+        );
+      }
     });
   }
 
@@ -1387,7 +1410,10 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     _newRecord = true;
     unawaited(
       SharedPreferences.getInstance().then(
-        (prefs) => prefs.setInt(_survivalBestKey, _best),
+        (prefs) => prefs.setInt(
+          AccountScopedPreferences.keyFor(_playerId, _survivalBestKey),
+          _best,
+        ),
       ),
     );
   }

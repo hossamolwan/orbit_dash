@@ -5,6 +5,7 @@ import 'package:orbit_dash/main.dart';
 import 'package:orbit_dash/gem_wallet.dart';
 import 'package:orbit_dash/skins.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:orbit_dash/account_scoped_preferences.dart';
 
 TextSpan _spanWithText(InlineSpan span, String target) {
   if (span is TextSpan) {
@@ -44,11 +45,14 @@ void main() {
     const walletState =
         '{"version":2,"balance":500,"dailyRewardDate":null,"dailyRewardIds":[],"purchases":{"ship.emerald":40,"orbit.aurora":60,"core.crimson":75,"trail.solar":100}}';
     SharedPreferences.setMockInitialValues({
-      GemWallet.stateKey: walletState,
-      SkinStore.selectedSkinKey: 'emerald',
-      AppearanceStore.selectedOrbitKey: 'aurora',
-      AppearanceStore.selectedCoreKey: 'crimson',
-      AppearanceStore.selectedTrailKey: 'solar',
+      AccountScopedPreferences.localKey(GemWallet.stateKey): walletState,
+      AccountScopedPreferences.localKey(SkinStore.selectedSkinKey): 'emerald',
+      AccountScopedPreferences.localKey(AppearanceStore.selectedOrbitKey):
+          'aurora',
+      AccountScopedPreferences.localKey(AppearanceStore.selectedCoreKey):
+          'crimson',
+      AccountScopedPreferences.localKey(AppearanceStore.selectedTrailKey):
+          'solar',
     });
     final driver = OrbitGameTestDriver();
     await tester.pumpWidget(
@@ -121,11 +125,36 @@ void main() {
     expect(driver.skinUnlocked(ShipSkinId.phantom), isFalse);
     await driver.flushProgress();
     final preferences = await SharedPreferences.getInstance();
-    expect(preferences.getString(GemWallet.stateKey), walletState);
-    expect(preferences.getString(SkinStore.selectedSkinKey), 'emerald');
-    expect(preferences.getString(AppearanceStore.selectedOrbitKey), 'aurora');
-    expect(preferences.getString(AppearanceStore.selectedCoreKey), 'crimson');
-    expect(preferences.getString(AppearanceStore.selectedTrailKey), 'solar');
+    expect(
+      preferences.getString(
+        AccountScopedPreferences.localKey(GemWallet.stateKey),
+      ),
+      walletState,
+    );
+    expect(
+      preferences.getString(
+        AccountScopedPreferences.localKey(SkinStore.selectedSkinKey),
+      ),
+      'emerald',
+    );
+    expect(
+      preferences.getString(
+        AccountScopedPreferences.localKey(AppearanceStore.selectedOrbitKey),
+      ),
+      'aurora',
+    );
+    expect(
+      preferences.getString(
+        AccountScopedPreferences.localKey(AppearanceStore.selectedCoreKey),
+      ),
+      'crimson',
+    );
+    expect(
+      preferences.getString(
+        AccountScopedPreferences.localKey(AppearanceStore.selectedTrailKey),
+      ),
+      'solar',
+    );
 
     await tester.tap(find.text('MAIN MENU'));
     await tester.pumpAndSettle();
@@ -394,7 +423,7 @@ void main() {
 
   testWidgets('shop buys and equips orbit and core cosmetics', (tester) async {
     SharedPreferences.setMockInitialValues({
-      GemWallet.stateKey: '{"version":2,"balance":300,"dailyRewardDate":null,"dailyRewardIds":[],"purchases":{}}',
+      AccountScopedPreferences.localKey(GemWallet.stateKey): '{"version":2,"balance":300,"dailyRewardDate":null,"dailyRewardIds":[],"purchases":{}}',
     });
     final driver = OrbitGameTestDriver();
     await tester.pumpWidget(
@@ -529,8 +558,18 @@ void main() {
     );
     await driver.flushProgress();
     final preferences = await SharedPreferences.getInstance();
-    expect(preferences.getString(AppearanceStore.selectedOrbitKey), 'aurora');
-    expect(preferences.getString(AppearanceStore.selectedCoreKey), 'crimson');
+    expect(
+      preferences.getString(
+        AccountScopedPreferences.localKey(AppearanceStore.selectedOrbitKey),
+      ),
+      'aurora',
+    );
+    expect(
+      preferences.getString(
+        AccountScopedPreferences.localKey(AppearanceStore.selectedCoreKey),
+      ),
+      'crimson',
+    );
     final restoredWallet = GemWallet();
     await restoredWallet.load();
     expect(restoredWallet.balance, 165);
@@ -543,10 +582,12 @@ void main() {
     tester,
   ) async {
     SharedPreferences.setMockInitialValues({
-      GemWallet.stateKey: '{"version":2,"balance":450,"dailyRewardDate":null,"dailyRewardIds":[],"purchases":{"ship.emerald":40,"orbit.aurora":60,"core.crimson":75}}',
-      SkinStore.selectedSkinKey: 'emerald',
-      AppearanceStore.selectedOrbitKey: 'aurora',
-      AppearanceStore.selectedCoreKey: 'crimson',
+      AccountScopedPreferences.localKey(GemWallet.stateKey): '{"version":2,"balance":450,"dailyRewardDate":null,"dailyRewardIds":[],"purchases":{"ship.emerald":40,"orbit.aurora":60,"core.crimson":75}}',
+      AccountScopedPreferences.localKey(SkinStore.selectedSkinKey): 'emerald',
+      AccountScopedPreferences.localKey(AppearanceStore.selectedOrbitKey):
+          'aurora',
+      AccountScopedPreferences.localKey(AppearanceStore.selectedCoreKey):
+          'crimson',
     });
     final driver = OrbitGameTestDriver();
     await tester.pumpWidget(
@@ -599,10 +640,30 @@ void main() {
 
     await driver.flushProgress();
     final preferences = await SharedPreferences.getInstance();
-    expect(preferences.getString(AppearanceStore.selectedTrailKey), 'solar');
-    expect(preferences.getString(SkinStore.selectedSkinKey), 'emerald');
-    expect(preferences.getString(AppearanceStore.selectedOrbitKey), 'aurora');
-    expect(preferences.getString(AppearanceStore.selectedCoreKey), 'crimson');
+    expect(
+      preferences.getString(
+        AccountScopedPreferences.localKey(AppearanceStore.selectedTrailKey),
+      ),
+      'solar',
+    );
+    expect(
+      preferences.getString(
+        AccountScopedPreferences.localKey(SkinStore.selectedSkinKey),
+      ),
+      'emerald',
+    );
+    expect(
+      preferences.getString(
+        AccountScopedPreferences.localKey(AppearanceStore.selectedOrbitKey),
+      ),
+      'aurora',
+    );
+    expect(
+      preferences.getString(
+        AccountScopedPreferences.localKey(AppearanceStore.selectedCoreKey),
+      ),
+      'crimson',
+    );
     final restoredWallet = GemWallet();
     await restoredWallet.load();
     final restoredAppearances = AppearanceStore();
@@ -620,10 +681,12 @@ void main() {
     tester,
   ) async {
     SharedPreferences.setMockInitialValues({
-      GemWallet.stateKey: '{"version":2,"balance":0,"dailyRewardDate":null,"dailyRewardIds":[],"purchases":{"ship.emerald":25,"orbit.aurora":40,"core.crimson":50}}',
-      SkinStore.selectedSkinKey: 'emerald',
-      AppearanceStore.selectedOrbitKey: 'aurora',
-      AppearanceStore.selectedCoreKey: 'crimson',
+      AccountScopedPreferences.localKey(GemWallet.stateKey): '{"version":2,"balance":0,"dailyRewardDate":null,"dailyRewardIds":[],"purchases":{"ship.emerald":25,"orbit.aurora":40,"core.crimson":50}}',
+      AccountScopedPreferences.localKey(SkinStore.selectedSkinKey): 'emerald',
+      AccountScopedPreferences.localKey(AppearanceStore.selectedOrbitKey):
+          'aurora',
+      AccountScopedPreferences.localKey(AppearanceStore.selectedCoreKey):
+          'crimson',
     });
     final driver = OrbitGameTestDriver();
     await tester.pumpWidget(
@@ -637,15 +700,17 @@ void main() {
     await tester.pumpAndSettle();
 
     final preferences = await SharedPreferences.getInstance();
-    final walletStateBefore = preferences.getString(GemWallet.stateKey);
+    final walletStateBefore = preferences.getString(
+      AccountScopedPreferences.localKey(GemWallet.stateKey),
+    );
     final shipSelectionBefore = preferences.getString(
-      SkinStore.selectedSkinKey,
+      AccountScopedPreferences.localKey(SkinStore.selectedSkinKey),
     );
     final orbitSelectionBefore = preferences.getString(
-      AppearanceStore.selectedOrbitKey,
+      AccountScopedPreferences.localKey(AppearanceStore.selectedOrbitKey),
     );
     final coreSelectionBefore = preferences.getString(
-      AppearanceStore.selectedCoreKey,
+      AccountScopedPreferences.localKey(AppearanceStore.selectedCoreKey),
     );
     final originalWallet = GemWallet();
     await originalWallet.load();
@@ -676,17 +741,28 @@ void main() {
     expect(driver.walletBalance, 0);
     expect(driver.selectedSkin, ShipSkinId.emerald);
     await _expectWalletOwnership(ownedBefore);
-    expect(preferences.getString(GemWallet.stateKey), walletStateBefore);
     expect(
-      preferences.getString(SkinStore.selectedSkinKey),
+      preferences.getString(
+        AccountScopedPreferences.localKey(GemWallet.stateKey),
+      ),
+      walletStateBefore,
+    );
+    expect(
+      preferences.getString(
+        AccountScopedPreferences.localKey(SkinStore.selectedSkinKey),
+      ),
       shipSelectionBefore,
     );
     expect(
-      preferences.getString(AppearanceStore.selectedOrbitKey),
+      preferences.getString(
+        AccountScopedPreferences.localKey(AppearanceStore.selectedOrbitKey),
+      ),
       orbitSelectionBefore,
     );
     expect(
-      preferences.getString(AppearanceStore.selectedCoreKey),
+      preferences.getString(
+        AccountScopedPreferences.localKey(AppearanceStore.selectedCoreKey),
+      ),
       coreSelectionBefore,
     );
     await tester.tap(find.byKey(const ValueKey('cosmetic-preview-close')));
@@ -757,21 +833,34 @@ void main() {
     expect(find.text('TRAIL SKINS'), findsOneWidget);
     expect(find.byKey(const ValueKey('trail-option-solar')), findsOneWidget);
     await driver.flushProgress();
-    expect(preferences.getString(GemWallet.stateKey), walletStateBefore);
     expect(
-      preferences.getString(SkinStore.selectedSkinKey),
+      preferences.getString(
+        AccountScopedPreferences.localKey(GemWallet.stateKey),
+      ),
+      walletStateBefore,
+    );
+    expect(
+      preferences.getString(
+        AccountScopedPreferences.localKey(SkinStore.selectedSkinKey),
+      ),
       shipSelectionBefore,
     );
     expect(
-      preferences.getString(AppearanceStore.selectedOrbitKey),
+      preferences.getString(
+        AccountScopedPreferences.localKey(AppearanceStore.selectedOrbitKey),
+      ),
       orbitSelectionBefore,
     );
     expect(
-      preferences.getString(AppearanceStore.selectedCoreKey),
+      preferences.getString(
+        AccountScopedPreferences.localKey(AppearanceStore.selectedCoreKey),
+      ),
       coreSelectionBefore,
     );
     expect(
-      preferences.getString(AppearanceStore.selectedTrailKey),
+      preferences.getString(
+        AccountScopedPreferences.localKey(AppearanceStore.selectedTrailKey),
+      ),
       TrailSkinId.classic.name,
     );
     await tester.pumpWidget(const SizedBox.shrink());
@@ -791,7 +880,9 @@ void main() {
     await tester.tap(find.byTooltip('Cosmetic shop'));
     await tester.pumpAndSettle();
     final preferences = await SharedPreferences.getInstance();
-    final walletBefore = preferences.getString(GemWallet.stateKey);
+    final walletBefore = preferences.getString(
+      AccountScopedPreferences.localKey(GemWallet.stateKey),
+    );
     final wallet = GemWallet();
     await wallet.load();
     final ownershipBefore = wallet.purchasedItemIds;
@@ -849,7 +940,12 @@ void main() {
       trailSkins.map((skin) => skin.id.name),
     );
     await driver.flushProgress();
-    expect(preferences.getString(GemWallet.stateKey), walletBefore);
+    expect(
+      preferences.getString(
+        AccountScopedPreferences.localKey(GemWallet.stateKey),
+      ),
+      walletBefore,
+    );
     final restored = GemWallet();
     await restored.load();
     expect(restored.purchasedItemIds, ownershipBefore);

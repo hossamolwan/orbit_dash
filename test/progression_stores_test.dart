@@ -6,6 +6,7 @@ import 'package:orbit_dash/player_statistics.dart';
 import 'package:orbit_dash/gem_wallet.dart';
 import 'package:orbit_dash/skins.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:orbit_dash/account_scoped_preferences.dart';
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
@@ -22,13 +23,17 @@ void main() {
         expect(await wallet.creditPickupOnce('pickup:99', 1), isFalse);
         final prefs = await SharedPreferences.getInstance();
         final saved = jsonDecode(
-          prefs.getString(GemWallet.stateKey)!,
+          prefs.getString(
+            AccountScopedPreferences.localKey(GemWallet.stateKey),
+          )!,
         ) as Map<String, dynamic>;
         expect(saved['balance'], 100);
         expect(saved['dailyRewardIds'], isEmpty);
         expect(saved.containsKey('grants'), isFalse);
         expect(
-          prefs.getString(GemWallet.stateKey)!.contains('pickup:'),
+          prefs
+              .getString(AccountScopedPreferences.localKey(GemWallet.stateKey))!
+              .contains('pickup:'),
           isFalse,
         );
       },
@@ -38,7 +43,7 @@ void main() {
       'upgrades an existing ledger while keeping only daily reward IDs',
       () async {
         SharedPreferences.setMockInitialValues({
-          GemWallet.stateKey: jsonEncode({
+          AccountScopedPreferences.localKey(GemWallet.stateKey): jsonEncode({
             'version': 1,
             'balance': 17,
             'grants': [
@@ -53,14 +58,18 @@ void main() {
         await wallet.load();
         final prefs = await SharedPreferences.getInstance();
         final saved = jsonDecode(
-          prefs.getString(GemWallet.stateKey)!,
+          prefs.getString(
+            AccountScopedPreferences.localKey(GemWallet.stateKey),
+          )!,
         ) as Map<String, dynamic>;
         expect(wallet.balance, 17);
         expect(wallet.owns('ship.emerald'), isTrue);
         expect(saved['version'], 2);
         expect(saved['dailyRewardIds'], ['collect_gems']);
         expect(
-          prefs.getString(GemWallet.stateKey)!.contains('pickup:'),
+          prefs
+              .getString(AccountScopedPreferences.localKey(GemWallet.stateKey))!
+              .contains('pickup:'),
           isFalse,
         );
       },
@@ -530,9 +539,12 @@ void main() {
       'invalid and unowned appearance selections fall back to defaults',
       () async {
         SharedPreferences.setMockInitialValues({
-          AppearanceStore.selectedOrbitKey: 'solar',
-          AppearanceStore.selectedCoreKey: 'unknown',
-          AppearanceStore.selectedTrailKey: 'solar',
+          AccountScopedPreferences.localKey(AppearanceStore.selectedOrbitKey):
+              'solar',
+          AccountScopedPreferences.localKey(AppearanceStore.selectedCoreKey):
+              'unknown',
+          AccountScopedPreferences.localKey(AppearanceStore.selectedTrailKey):
+              'solar',
         });
         final appearances = AppearanceStore();
         await appearances.load();
@@ -541,8 +553,14 @@ void main() {
         expect(appearances.selectedTrail, TrailSkinId.classic);
 
         final preferences = await SharedPreferences.getInstance();
-        await preferences.setString(AppearanceStore.selectedOrbitKey, 'aurora');
-        await preferences.setString(AppearanceStore.selectedCoreKey, 'crimson');
+        await preferences.setString(
+          AccountScopedPreferences.localKey(AppearanceStore.selectedOrbitKey),
+          'aurora',
+        );
+        await preferences.setString(
+          AccountScopedPreferences.localKey(AppearanceStore.selectedCoreKey),
+          'crimson',
+        );
         final unowned = AppearanceStore();
         await unowned.load(ownedItemIds: {'ship.solar'});
         expect(unowned.selectedOrbit, OrbitSkinId.defaultOrbit);
@@ -598,10 +616,10 @@ void main() {
     });
 
     test(
-      'malformed wallet data resets cleanly and lifetime stats stay separate',
+      'malformed wallet resets and unowned legacy gems are ignored',
       () async {
         SharedPreferences.setMockInitialValues({
-          GemWallet.stateKey: '{broken',
+          AccountScopedPreferences.localKey(GemWallet.stateKey): '{broken',
           'orbit_dash_total_gems': 40,
         });
         final wallet = GemWallet();
@@ -609,7 +627,7 @@ void main() {
         expect(wallet.balance, 0);
         final achievement = AchievementStore();
         await achievement.load();
-        expect(achievement.totalGems, 40);
+        expect(achievement.totalGems, 0);
         await wallet
             .purchase(itemId: 'ship.x', price: -1)
             .then((result) => expect(result, isFalse));
@@ -666,7 +684,13 @@ void main() {
       () async {
         SharedPreferences.setMockInitialValues({
           'orbit_dash_unlocked_stage': 4,
-          PlayerStatisticsStore.completedStagesKey: ['2', 'invalid', '8'],
+          AccountScopedPreferences.localKey(
+            PlayerStatisticsStore.completedStagesKey,
+          ): [
+            '2',
+            'invalid',
+            '8',
+          ],
         });
         final first = PlayerStatisticsStore();
         await first.load(highestUnlockedStage: 4);
@@ -683,8 +707,11 @@ void main() {
       'invalid counters do not prevent later progress from being saved',
       () async {
         SharedPreferences.setMockInitialValues({
-          PlayerStatisticsStore.runsStartedKey: 'invalid',
-          PlayerStatisticsStore.lossesKey: -10,
+          AccountScopedPreferences.localKey(
+            PlayerStatisticsStore.runsStartedKey,
+          ): 'invalid',
+          AccountScopedPreferences.localKey(PlayerStatisticsStore.lossesKey):
+              -10,
         });
         final store = PlayerStatisticsStore();
         await store.load(highestUnlockedStage: 1);

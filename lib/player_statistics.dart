@@ -2,9 +2,14 @@ import 'dart:async';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'account_scoped_preferences.dart';
+
 class PlayerStatisticsStore {
-  PlayerStatisticsStore({Future<SharedPreferences> Function()? loadPreferences})
-    : _loadPreferences = loadPreferences ?? SharedPreferences.getInstance;
+  PlayerStatisticsStore({
+    String playerId = AccountScopedPreferences.localPlayerId,
+    Future<SharedPreferences> Function()? loadPreferences,
+  }) : _keys = AccountScopedPreferences(playerId),
+       _loadPreferences = loadPreferences ?? SharedPreferences.getInstance;
 
   static const runsStartedKey = 'orbit_dash_stats_runs_started_v1';
 
@@ -16,6 +21,7 @@ class PlayerStatisticsStore {
   static const maxOrbitKey = 'orbit_dash_stats_max_orbit_v1';
 
   final Future<SharedPreferences> Function() _loadPreferences;
+  final AccountScopedPreferences _keys;
   final Set<int> _completedStages = {};
   int _runsStarted = 0;
   int _shieldAbsorptions = 0;
@@ -54,7 +60,7 @@ class PlayerStatisticsStore {
     }
     _loaded = true;
     await preferences.setStringList(
-      completedStagesKey,
+      _keys.key(completedStagesKey),
       _completedStages.map((stage) => '$stage').toList()..sort(),
     );
   });
@@ -73,8 +79,8 @@ class PlayerStatisticsStore {
         if (!_loaded) await _loadFrom(preferences);
         if (score > _bestRun) _bestRun = score;
         if (maxOrbit > _maxOrbit) _maxOrbit = maxOrbit.clamp(2, 5);
-        await preferences.setInt(bestRunKey, _bestRun);
-        await preferences.setInt(maxOrbitKey, _maxOrbit);
+        await preferences.setInt(_keys.key(bestRunKey), _bestRun);
+        await preferences.setInt(_keys.key(maxOrbitKey), _maxOrbit);
       });
 
   /// Writes legacy campaign history without affecting Survival progression.
@@ -84,7 +90,7 @@ class PlayerStatisticsStore {
     if (!_loaded) await _loadFrom(preferences);
     if (_completedStages.add(stage)) {
       await preferences.setStringList(
-        completedStagesKey,
+        _keys.key(completedStagesKey),
         _completedStages.map((stage) => '$stage').toList()..sort(),
       );
     }
@@ -95,7 +101,7 @@ class PlayerStatisticsStore {
         final preferences = await _loadPreferences();
         if (!_loaded) await _loadFrom(preferences);
         increment();
-        await preferences.setInt(key, switch (key) {
+        await preferences.setInt(_keys.key(key), switch (key) {
           runsStartedKey => _runsStarted,
           shieldAbsorptionsKey => _shieldAbsorptions,
           _ => _losses,
@@ -116,7 +122,7 @@ class PlayerStatisticsStore {
 
   int _readCounter(SharedPreferences preferences, String key) {
     try {
-      return (preferences.getInt(key) ?? 0).clamp(0, 1 << 31);
+      return (preferences.getInt(_keys.key(key)) ?? 0).clamp(0, 1 << 31);
     } on TypeError {
       return 0;
     }
@@ -124,7 +130,8 @@ class PlayerStatisticsStore {
 
   Set<int> _readCompletedStages(SharedPreferences preferences) {
     try {
-      return (preferences.getStringList(completedStagesKey) ?? const [])
+      return (preferences.getStringList(_keys.key(completedStagesKey)) ??
+              const [])
           .map(int.tryParse)
           .whereType<int>()
           .where((stage) => stage >= 1 && stage <= 5)

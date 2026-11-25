@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'account_scoped_preferences.dart';
+
 enum AchievementId {
   firstSteps,
   gemCollector,
@@ -77,12 +79,15 @@ const List<AchievementDefinition> achievementDefinitions = [
 ];
 
 class AchievementStore {
-  AchievementStore({Future<SharedPreferences> Function()? loadPreferences})
-    : _loadPreferences = loadPreferences ?? SharedPreferences.getInstance;
+  AchievementStore({
+    String playerId = AccountScopedPreferences.localPlayerId,
+    Future<SharedPreferences> Function()? loadPreferences,
+  }) : _accountKeys = AccountScopedPreferences(playerId),
+       _loadPreferences = loadPreferences ?? SharedPreferences.getInstance;
 
   static const totalGemsKey = 'orbit_dash_total_gems';
 
-  static const Map<AchievementId, String> _keys = {
+  static const Map<AchievementId, String> _achievementPreferenceKeys = {
     AchievementId.firstSteps: 'orbit_dash_achievement_first_steps',
     AchievementId.gemCollector: 'orbit_dash_achievement_gem_collector',
     AchievementId.savedByShield: 'orbit_dash_achievement_saved_by_shield',
@@ -95,10 +100,12 @@ class AchievementStore {
     AchievementId.survivalRun25: 'orbit_dash_achievement_survival_run_25',
   };
 
-  static String preferenceKeyFor(AchievementId id) => _keys[id]!;
+  static String preferenceKeyFor(AchievementId id) =>
+      _achievementPreferenceKeys[id]!;
 
   int _totalGems = 0;
   final Future<SharedPreferences> Function() _loadPreferences;
+  final AccountScopedPreferences _accountKeys;
   final Set<AchievementId> _unlocked = {};
   bool _loaded = false;
   Future<void> _tail = Future<void>.value();
@@ -116,7 +123,7 @@ class AchievementStore {
     final preferences = await _loadPreferences();
     if (!_loaded) await _loadFrom(preferences);
     _totalGems++;
-    await preferences.setInt(totalGemsKey, _totalGems);
+    await preferences.setInt(_accountKeys.key(totalGemsKey), _totalGems);
 
     final newlyUnlocked = <AchievementId>[];
     if (_totalGems >= 10) {
@@ -162,7 +169,9 @@ class AchievementStore {
     _unlocked
       ..clear()
       ..addAll(
-        AchievementId.values.where((id) => _readBool(preferences, _keys[id]!)),
+        AchievementId.values.where(
+          (id) => _readBool(preferences, _achievementPreferenceKeys[id]!),
+        ),
       );
     _loaded = true;
 
@@ -184,7 +193,10 @@ class AchievementStore {
     if (_unlocked.contains(id)) return;
     _unlocked.add(id);
     newlyUnlocked.add(id);
-    await preferences.setBool(_keys[id]!, true);
+    await preferences.setBool(
+      _accountKeys.key(_achievementPreferenceKeys[id]!),
+      true,
+    );
   }
 
   Future<T> _serialize<T>(Future<T> Function() action) async {
@@ -201,7 +213,7 @@ class AchievementStore {
 
   int _readInt(SharedPreferences preferences, String key) {
     try {
-      return preferences.getInt(key) ?? 0;
+      return preferences.getInt(_accountKeys.key(key)) ?? 0;
     } on TypeError {
       return 0;
     }
@@ -209,7 +221,7 @@ class AchievementStore {
 
   bool _readBool(SharedPreferences preferences, String key) {
     try {
-      return preferences.getBool(key) ?? false;
+      return preferences.getBool(_accountKeys.key(key)) ?? false;
     } on TypeError {
       return false;
     }

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:orbit_dash/achievements.dart';
+import 'package:orbit_dash/account_scoped_preferences.dart';
 import 'package:orbit_dash/audio/game_audio_manager.dart';
 import 'package:orbit_dash/main.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -12,7 +13,7 @@ void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({
       'orbit_dash_best': 12,
-      'orbit_dash_survival_best': 12,
+      AccountScopedPreferences.localKey('orbit_dash_survival_best'): 12,
     });
   });
 
@@ -98,13 +99,17 @@ void main() {
       expect(preferences.getInt('orbit_dash_unlocked_stage'), 3);
       expect(
         preferences.getBool(
-          AchievementStore.preferenceKeyFor(AchievementId.firstSteps),
+          AccountScopedPreferences.localKey(
+            AchievementStore.preferenceKeyFor(AchievementId.firstSteps),
+          ),
         ),
         isTrue,
       );
       expect(
         preferences.getBool(
-          AchievementStore.preferenceKeyFor(AchievementId.gemCollector),
+          AccountScopedPreferences.localKey(
+            AchievementStore.preferenceKeyFor(AchievementId.gemCollector),
+          ),
         ),
         isTrue,
       );
@@ -551,7 +556,7 @@ void main() {
     (tester) async {
       SharedPreferences.setMockInitialValues({
         'orbit_dash_best': 21,
-        'orbit_dash_survival_best': 0,
+        AccountScopedPreferences.localKey('orbit_dash_survival_best'): 0,
       });
       final driver = OrbitGameTestDriver();
       await tester.pumpWidget(
@@ -572,7 +577,12 @@ void main() {
       await driver.flushProgress();
       final prefs = await SharedPreferences.getInstance();
       expect(prefs.getInt('orbit_dash_best'), 21);
-      expect(prefs.getInt('orbit_dash_survival_best'), 1);
+      expect(
+        prefs.getInt(
+          AccountScopedPreferences.localKey('orbit_dash_survival_best'),
+        ),
+        1,
+      );
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );
@@ -627,7 +637,7 @@ void main() {
   ) async {
     SharedPreferences.setMockInitialValues({
       'orbit_dash_best': 12,
-      'orbit_dash_survival_best': 12,
+      AccountScopedPreferences.localKey('orbit_dash_survival_best'): 12,
       'orbit_dash_unlocked_stage': 3,
     });
     final driver = OrbitGameTestDriver();
@@ -796,7 +806,9 @@ void main() {
   testWidgets('persists gem progress across retry and a recreated game page', (
     tester,
   ) async {
-    SharedPreferences.setMockInitialValues({AchievementStore.totalGemsKey: 9});
+    SharedPreferences.setMockInitialValues({
+      AccountScopedPreferences.localKey(AchievementStore.totalGemsKey): 9,
+    });
     final driver = await _startShieldGame(tester);
     driver.placeGemAtPlayer();
     await tester.pump(const Duration(milliseconds: 16));
@@ -903,8 +915,10 @@ void main() {
     tester,
   ) async {
     SharedPreferences.setMockInitialValues({
-      AchievementStore.totalGemsKey: 14,
-      AchievementStore.preferenceKeyFor(AchievementId.firstSteps): true,
+      AccountScopedPreferences.localKey(AchievementStore.totalGemsKey): 14,
+      AccountScopedPreferences.localKey(
+        AchievementStore.preferenceKeyFor(AchievementId.firstSteps),
+      ): true,
       'orbit_dash_best': 12,
     });
     var loadAttempts = 0;
@@ -938,10 +952,17 @@ void main() {
     expect(find.text('RETRY'), findsOneWidget);
 
     final preferences = await SharedPreferences.getInstance();
-    expect(preferences.getInt(AchievementStore.totalGemsKey), 14);
+    expect(
+      preferences.getInt(
+        AccountScopedPreferences.localKey(AchievementStore.totalGemsKey),
+      ),
+      14,
+    );
     expect(
       preferences.getBool(
-        AchievementStore.preferenceKeyFor(AchievementId.firstSteps),
+        AccountScopedPreferences.localKey(
+          AchievementStore.preferenceKeyFor(AchievementId.firstSteps),
+        ),
       ),
       isTrue,
     );
@@ -964,7 +985,12 @@ void main() {
           .data,
       'OPEN',
     );
-    expect(preferences.getInt(AchievementStore.totalGemsKey), 14);
+    expect(
+      preferences.getInt(
+        AccountScopedPreferences.localKey(AchievementStore.totalGemsKey),
+      ),
+      14,
+    );
   });
   group('variable orbit geometry', () {
     for (var count = 2; count <= 5; count++) {

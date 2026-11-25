@@ -5,13 +5,14 @@ import 'package:orbit_dash/audio/game_audio_manager.dart';
 import 'package:orbit_dash/gem_wallet.dart';
 import 'package:orbit_dash/main.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:orbit_dash/account_scoped_preferences.dart';
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
   testWidgets('achievement notice text is explicitly white', (tester) async {
     SharedPreferences.setMockInitialValues({
-      AchievementStore.totalGemsKey: 9,
+      AccountScopedPreferences.localKey(AchievementStore.totalGemsKey): 9,
       'orbit_dash_best': 12,
     });
     final driver = OrbitGameTestDriver();
@@ -45,8 +46,8 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     SharedPreferences.setMockInitialValues({
-      AchievementStore.totalGemsKey: 900,
-      GemWallet.stateKey: '{"version":2,"balance":23,"dailyRewardDate":null,"dailyRewardIds":[],"purchases":{}}',
+      AccountScopedPreferences.localKey(AchievementStore.totalGemsKey): 900,
+      AccountScopedPreferences.localKey(GemWallet.stateKey): '{"version":2,"balance":23,"dailyRewardDate":null,"dailyRewardIds":[],"purchases":{}}',
     });
 
     await tester.pumpWidget(
