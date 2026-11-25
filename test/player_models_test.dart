@@ -17,7 +17,14 @@ void main() {
       );
 
       expect(PlayerProfile.fromMap(profile.toMap()), profile);
-      expect(profile.toMap()['photoUrl'], isNull);
+      expect(profile.toMap(), {
+        'uid': 'uid-1',
+        'displayName': 'Orbit Pilot',
+        'photoUrl': null,
+        'createdAt': '2025-01-02T03:04:00.000Z',
+        'updatedAt': '2025-02-03T04:05:00.000Z',
+        'schemaVersion': 2,
+      });
     });
 
     test('uses safe legacy defaults and rejects malformed values', () {
@@ -61,6 +68,14 @@ void main() {
 
       expect(PlayerProgress.fromMap(progress.toMap()), progress);
       expect(progress.hashCode, PlayerProgress.fromMap(progress.toMap()).hashCode);
+      expect(progress.toMap(), {
+        'level': 8,
+        'xp': 24,
+        'totalXp': 1024,
+        'highScore': 530,
+        'totalRuns': 40,
+        'totalDistance': 1290.5,
+      });
     });
 
     test('defaults absent and malformed values safely', () {
@@ -100,6 +115,11 @@ void main() {
       );
 
       expect(PlayerInventory.fromMap(inventory.toMap()), inventory);
+      expect(inventory.toMap(), {
+        'ownedSkinIds': ['ship.emerald', 'ship.solar'],
+        'equippedSkinId': 'ship.solar',
+        'ownedItemIds': ['trail.aurora'],
+      });
       expect(
         inventory,
         PlayerInventory(
@@ -139,6 +159,12 @@ void main() {
       );
 
       expect(PlayerSettings.fromMap(settings.toMap()), settings);
+      expect(settings.toMap(), {
+        'soundEnabled': false,
+        'musicEnabled': true,
+        'vibrationEnabled': false,
+        'language': 'ar',
+      });
     });
 
     test('uses existing audio defaults for absent or malformed preferences', () {
