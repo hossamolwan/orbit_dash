@@ -9,6 +9,7 @@ import 'package:orbit_dash/data/player/player_lifecycle_coordinator.dart';
 import 'package:orbit_dash/firebase_player_identity.dart';
 import 'package:orbit_dash/gem_wallet.dart';
 import 'package:orbit_dash/gem_shop.dart';
+import 'package:orbit_dash/local_data_preflight.dart';
 import 'package:orbit_dash/player_identity.dart';
 import 'package:orbit_dash/player_statistics.dart';
 import 'package:orbit_dash/skins.dart';
@@ -580,9 +581,13 @@ bool isDebugCosmeticTestingEnabled({
 
 /// Deterministic controls and observations for game-cycle widget tests.
 class OrbitGameTestDriver {
-  OrbitGameTestDriver({this.achievementPreferencesLoader});
+  OrbitGameTestDriver({
+    this.achievementPreferencesLoader,
+    this.preflightPreferencesLoader,
+  });
 
   final Future<SharedPreferences> Function()? achievementPreferencesLoader;
+  final Future<SharedPreferences> Function()? preflightPreferencesLoader;
 
   late void Function() _placeShieldAtPlayer;
   late void Function() _placeHazardAtPlayer;
@@ -609,6 +614,7 @@ class OrbitGameTestDriver {
   late bool Function(ShipSkinId id) _readSkinUnlocked;
   late Future<void> Function() _flushProgress;
   late void Function(Future<void> Function()) _enqueueFeatureWrite;
+  late LocalDataInventorySnapshot? Function() _readPreflightSnapshot;
 
   bool get shieldActive => _readShieldActive();
   Duration get shieldRemaining => _readShieldRemaining();
@@ -630,6 +636,7 @@ class OrbitGameTestDriver {
   TrailSkinId get selectedTrail => _readSelectedTrail();
   bool skinUnlocked(ShipSkinId id) => _readSkinUnlocked(id);
   Future<void> flushProgress() => _flushProgress();
+  LocalDataInventorySnapshot? get preflightSnapshot => _readPreflightSnapshot();
   void queueFeatureWrite(Future<void> Function() write) =>
       _enqueueFeatureWrite(write);
 
@@ -664,6 +671,7 @@ class OrbitGameTestDriver {
     required bool Function(ShipSkinId id) readSkinUnlocked,
     required Future<void> Function() flushProgress,
     required void Function(Future<void> Function()) enqueueFeatureWrite,
+    required LocalDataInventorySnapshot? Function() readPreflightSnapshot,
   }) {
     _placeShieldAtPlayer = placeShieldAtPlayer;
     _placeHazardAtPlayer = placeHazardAtPlayer;
@@ -690,6 +698,7 @@ class OrbitGameTestDriver {
     _readSkinUnlocked = readSkinUnlocked;
     _flushProgress = flushProgress;
     _enqueueFeatureWrite = enqueueFeatureWrite;
+    _readPreflightSnapshot = readPreflightSnapshot;
   }
 }
 
@@ -887,6 +896,7 @@ class OrbitGamePage extends StatefulWidget {
     this.audioController,
     this.session,
     this.testDriver,
+    this.onLocalDataInventoryReady,
     this.dailyChallengesNow,
     this.orbitUnlockNotificationDuration = const Duration(milliseconds: 2000),
   });
@@ -894,6 +904,7 @@ class OrbitGamePage extends StatefulWidget {
   final GameAudioController? audioController;
   final PlayerSessionSnapshot? session;
   final OrbitGameTestDriver? testDriver;
+  final ValueChanged<LocalDataInventorySnapshot>? onLocalDataInventoryReady;
   final DateTime Function()? dailyChallengesNow;
   final Duration orbitUnlockNotificationDuration;
 
@@ -957,6 +968,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   bool _featureStoresLoaded = false;
   bool _featureStoreLoadFailed = false;
   late Future<void> _featureStoresReady;
+  LocalDataInventorySnapshot? _localDataInventory;
   late final AchievementStore _achievementStore;
   Future<void> _achievementUpdates = Future<void>.value();
   Future<void> _pendingFeatureWrites = Future<void>.value();
@@ -1039,8 +1051,9 @@ class _OrbitGamePageState extends State<OrbitGamePage>
           id == ShipSkinId.defaultSkin || _wallet.owns('ship.${id.name}'),
       flushProgress: _flushProgress,
       enqueueFeatureWrite: _queueFeatureWrite,
+      readPreflightSnapshot: () => _localDataInventory,
     );
-    _featureStoresReady = _loadFeatureStores();
+    _featureStoresReady = _preflightThenLoadFeatureStores();
     unawaited(_featureStoresReady);
     SharedPreferences.getInstance().then((prefs) {
       if (mounted) {
@@ -1053,6 +1066,25 @@ class _OrbitGamePageState extends State<OrbitGamePage>
         );
       }
     });
+  }
+
+  Future<void> _preflightThenLoadFeatureStores() async {
+    try {
+      final inventory = await LocalDataPreflight(
+        playerId: _playerId,
+        loadPreferences: widget.testDriver?.preflightPreferencesLoader,
+      ).inspect();
+      if (!mounted) return;
+      _localDataInventory = inventory;
+      if (!inventory.isComplete) {
+        throw StateError('Local data preflight did not complete.');
+      }
+      widget.onLocalDataInventoryReady?.call(inventory);
+      await _loadFeatureStores();
+    } catch (error) {
+      debugPrint('Failed to inspect local player data: $error');
+      if (mounted) setState(() => _featureStoreLoadFailed = true);
+    }
   }
 
   Future<void> _loadFeatureStores() async {
@@ -1091,7 +1123,8 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   }
 
   void _retryFeatureStores() {
-    _featureStoresReady = _loadFeatureStores();
+    _featureStoreLoadFailed = false;
+    _featureStoresReady = _preflightThenLoadFeatureStores();
     unawaited(_featureStoresReady);
   }
 
