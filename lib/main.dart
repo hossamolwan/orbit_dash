@@ -296,12 +296,13 @@ class _PlayerAuthenticationGateState extends State<PlayerAuthenticationGate> {
     if (_identityState.hasRecoverableIdentity) {
       final identity = _identityState.requireRecoverableIdentity();
       final lifecycle = _playerLifecycleState;
+      final session = lifecycle.session;
       if (lifecycle.phase == PlayerLifecyclePhase.ready &&
-          lifecycle.session?.identity.id == identity.id) {
+          session?.identity.id == identity.id) {
         return OrbitGamePage(
           key: ValueKey<String>(identity.id),
           audioController: widget.audioController,
-          identityService: _identityService,
+          session: session,
         );
       }
       if (lifecycle.phase == PlayerLifecyclePhase.failed) {
@@ -595,6 +596,7 @@ class OrbitGameTestDriver {
   late RunState Function() _readRunState;
   late int Function() _readTotalGems;
   late int Function() _readWalletBalance;
+  late String Function() _readPlayerId;
   late bool Function(AchievementId id) _readAchievementUnlocked;
   late Future<void> Function() _flushAchievements;
   late int Function() _readRunsStarted;
@@ -616,6 +618,7 @@ class OrbitGameTestDriver {
   RunState get runState => _readRunState();
   int get totalGems => _readTotalGems();
   int get walletBalance => _readWalletBalance();
+  String get playerId => _readPlayerId();
   bool achievementUnlocked(AchievementId id) => _readAchievementUnlocked(id);
   Future<void> flushAchievements() => _flushAchievements();
   int get runsStarted => _readRunsStarted();
@@ -648,6 +651,7 @@ class OrbitGameTestDriver {
     required RunState Function() readRunState,
     required int Function() readTotalGems,
     required int Function() readWalletBalance,
+    required String Function() readPlayerId,
     required bool Function(AchievementId id) readAchievementUnlocked,
     required Future<void> Function() flushAchievements,
     required int Function() readRunsStarted,
@@ -673,6 +677,7 @@ class OrbitGameTestDriver {
     _readRunState = readRunState;
     _readTotalGems = readTotalGems;
     _readWalletBalance = readWalletBalance;
+    _readPlayerId = readPlayerId;
     _readAchievementUnlocked = readAchievementUnlocked;
     _flushAchievements = flushAchievements;
     _readRunsStarted = readRunsStarted;
@@ -880,14 +885,14 @@ class OrbitGamePage extends StatefulWidget {
   const OrbitGamePage({
     super.key,
     this.audioController,
-    this.identityService,
+    this.session,
     this.testDriver,
     this.dailyChallengesNow,
     this.orbitUnlockNotificationDuration = const Duration(milliseconds: 2000),
   });
 
   final GameAudioController? audioController;
-  final PlayerIdentityService? identityService;
+  final PlayerSessionSnapshot? session;
   final OrbitGameTestDriver? testDriver;
   final DateTime Function()? dailyChallengesNow;
   final Duration orbitUnlockNotificationDuration;
@@ -975,10 +980,8 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    final identity = widget.identityService?.state.identity;
-    _playerId = identity?.id.isNotEmpty == true
-        ? identity!.id
-        : AccountScopedPreferences.localPlayerId;
+    _playerId =
+        widget.session?.identity.id ?? AccountScopedPreferences.localPlayerId;
     _statisticsStore = PlayerStatisticsStore(playerId: _playerId);
     _skinStore = SkinStore(playerId: _playerId);
     _appearanceStore = AppearanceStore(playerId: _playerId);
@@ -1022,6 +1025,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
       readRunState: () => _state,
       readTotalGems: () => _achievementStore.totalGems,
       readWalletBalance: () => _wallet.balance,
+      readPlayerId: () => _playerId,
       readAchievementUnlocked: _achievementStore.isUnlocked,
       flushAchievements: _flushAchievements,
       readRunsStarted: () => _statisticsStore.runsStarted,

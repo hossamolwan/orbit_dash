@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:orbit_dash/audio/game_audio_manager.dart';
 import 'package:orbit_dash/data/player/player_lifecycle_coordinator.dart';
 import 'package:orbit_dash/data/player/player_repository.dart';
 import 'package:orbit_dash/account_scoped_preferences.dart';
@@ -43,16 +44,84 @@ void main() {
   testWidgets('authenticated users can access gameplay after hydration', (
     tester,
   ) async {
-    final service = _FakeIdentityService(
-      initialState: const PlayerIdentitySnapshot(
-        status: PlayerIdentityStatus.authenticated,
-        identity: PlayerIdentity(id: 'firebase-user-1'),
-      ),
+    final service = _authenticatedService('firebase-user-1');
+    final repository = _FakePlayerRepository(uid: 'firebase-user-1');
+    await tester.pumpWidget(
+      _testApp(service, repositoryFactory: (_) => repository),
     );
-    await tester.pumpWidget(_testApp(service));
     await _pumpFrames(tester);
 
     expect(find.byType(OrbitGamePage), findsOneWidget);
+    final game = tester.widget<OrbitGamePage>(find.byType(OrbitGamePage));
+    expect(game.session?.identity.id, 'firebase-user-1');
+    expect(game.session?.profile.uid, 'firebase-user-1');
+    expect(repository.loadProfileCalls, 1);
+  });
+
+  testWidgets('gameplay stays blocked when the loaded profile UID mismatches', (
+    tester,
+  ) async {
+    final service = _authenticatedService('authenticated-player');
+    await tester.pumpWidget(
+      _testApp(
+        service,
+        repositoryFactory: (_) =>
+            _FakePlayerRepository(uid: 'different-player'),
+      ),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.byType(OrbitGamePage), findsNothing);
+    expect(
+      find.textContaining('We could not load your player data'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('gameplay stores bind to the supplied session UID', (
+    tester,
+  ) async {
+    final driver = OrbitGameTestDriver();
+    final date = DateTime.utc(2025);
+    final session = PlayerSessionSnapshot(
+      identity: const PlayerIdentity(id: 'session-player'),
+      profile: PlayerProfile(
+        uid: 'session-player',
+        displayName: 'Pilot',
+        createdAt: date,
+        updatedAt: date,
+      ),
+      progress: const PlayerProgress(),
+      inventory: PlayerInventory(),
+      settings: const PlayerSettings(),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: OrbitGamePage(
+          session: session,
+          audioController: _TestAudioController(),
+          testDriver: driver,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(driver.playerId, 'session-player');
+    final preferences = await SharedPreferences.getInstance();
+    expect(
+      preferences.getString(
+        AccountScopedPreferences.keyFor('session-player', GemWallet.stateKey),
+      ),
+      isNotNull,
+    );
+    expect(
+      preferences.getString(
+        AccountScopedPreferences.localKey(GemWallet.stateKey),
+      ),
+      isNull,
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 
   testWidgets(
@@ -188,6 +257,14 @@ void main() {
     );
     await _pumpFrames(tester);
     expect(find.byKey(const ValueKey<String>('player-a')), findsOneWidget);
+    expect(
+      tester
+          .widget<OrbitGamePage>(find.byType(OrbitGamePage))
+          .session
+          ?.identity
+          .id,
+      'player-a',
+    );
 
     service.emit(_authenticated('player-b'));
     await tester.pump();
@@ -197,6 +274,14 @@ void main() {
     bProfile.complete(_profile('player-b'));
     await _pumpFrames(tester);
     expect(find.byKey(const ValueKey<String>('player-b')), findsOneWidget);
+    expect(
+      tester
+          .widget<OrbitGamePage>(find.byType(OrbitGamePage))
+          .session
+          ?.identity
+          .id,
+      'player-b',
+    );
   });
 
   testWidgets('gameplay stores use the authenticated UID namespace', (
@@ -445,6 +530,35 @@ class _FakeIdentityService implements PlayerIdentityService {
     initialState = next;
     _states.add(next);
   }
+}
+
+class _TestAudioController extends GameAudioController {
+  @override
+  bool get musicEnabled => true;
+
+  @override
+  bool get effectsEnabled => true;
+
+  @override
+  Future<void> initialize() async {}
+
+  @override
+  void setGameState(AudioRunState state) {}
+
+  @override
+  void setAppActive(bool active) {}
+
+  @override
+  Future<void> setMusicEnabled(bool enabled) async {}
+
+  @override
+  Future<void> setEffectsEnabled(bool enabled) async {}
+
+  @override
+  void playEffect(GameSoundEffect effect) {}
+
+  @override
+  Future<void> shutdown() async {}
 }
 
 Widget _testApp(
