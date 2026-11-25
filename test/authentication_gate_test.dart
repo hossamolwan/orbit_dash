@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:orbit_dash/audio/game_audio_manager.dart';
 import 'package:orbit_dash/data/player/player_lifecycle_coordinator.dart';
+import 'package:orbit_dash/data/player/player_data_result.dart';
 import 'package:orbit_dash/data/player/player_repository.dart';
 import 'package:orbit_dash/account_scoped_preferences.dart';
 import 'package:orbit_dash/gem_wallet.dart';
@@ -91,9 +92,13 @@ void main() {
         createdAt: date,
         updatedAt: date,
       ),
-      progress: const PlayerProgress(),
-      inventory: PlayerInventory(),
-      settings: const PlayerSettings(),
+      progress: const PlayerDataResult<PlayerProgress>.present(
+        PlayerProgress(),
+      ),
+      inventory: PlayerDataResult<PlayerInventory>.present(PlayerInventory()),
+      settings: const PlayerDataResult<PlayerSettings>.present(
+        PlayerSettings(),
+      ),
     );
 
     await tester.pumpWidget(
@@ -640,16 +645,23 @@ class _FakePlayerRepository implements PlayerRepository {
   }) => throw UnimplementedError();
 
   @override
-  Future<PlayerProgress?> loadProgress() async {
-    if (progressLoad case final completer?) return completer.future;
-    return null;
+  Future<PlayerDataResult<PlayerProgress>> loadProgress() async {
+    if (progressLoad case final completer?) {
+      final result = await completer.future;
+      return result == null
+          ? const PlayerDataResult<PlayerProgress>.missing()
+          : PlayerDataResult<PlayerProgress>.present(result);
+    }
+    return const PlayerDataResult<PlayerProgress>.missing();
   }
 
   @override
-  Future<PlayerInventory?> loadInventory() async => null;
+  Future<PlayerDataResult<PlayerInventory>> loadInventory() async =>
+      const PlayerDataResult<PlayerInventory>.missing();
 
   @override
-  Future<PlayerSettings?> loadSettings() async => null;
+  Future<PlayerDataResult<PlayerSettings>> loadSettings() async =>
+      const PlayerDataResult<PlayerSettings>.missing();
 
   @override
   Future<void> saveSettings(PlayerSettings settings) async =>

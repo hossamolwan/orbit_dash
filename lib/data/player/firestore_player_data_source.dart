@@ -1,7 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 
 import '../../player_models.dart';
 import 'player_data_source.dart';
+import 'player_data_result.dart';
 
 /// Firestore implementation of the player data storage boundary.
 ///
@@ -19,18 +21,15 @@ class FirestorePlayerDataSource implements PlayerDataSource {
   DocumentReference<Map<String, dynamic>> _domainDocument(
     String uid,
     String domain,
-  ) =>
-      _playerDocument(uid).collection(domain).doc('data');
+  ) => _playerDocument(uid).collection(domain).doc('data');
 
   @override
-  Future<PlayerProfile?> loadProfile(String uid) => _guard(
-    'load profile',
-    () async {
-      final snapshot = await _playerDocument(uid).get();
-      final data = snapshot.data();
-      return data == null ? null : _profileFromFirestore(uid, data);
-    },
-  );
+  Future<PlayerProfile?> loadProfile(String uid) =>
+      _guard('load profile', () async {
+        final snapshot = await _playerDocument(uid).get();
+        final data = snapshot.data();
+        return data == null ? null : _profileFromFirestore(uid, data);
+      });
 
   @override
   Future<PlayerProfile> createProfileIfAbsent(PlayerProfile profile) {
@@ -89,40 +88,38 @@ class FirestorePlayerDataSource implements PlayerDataSource {
   );
 
   @override
-  Future<PlayerProgress?> loadProgress(String uid) => _loadModel(
-    uid,
-    'progress',
-    PlayerProgress.fromMap,
-  );
+  Future<PlayerDataResult<PlayerProgress>> loadProgress(String uid) =>
+      _loadModel(uid, 'progress', PlayerProgress.fromMap);
 
   @override
-  Future<PlayerInventory?> loadInventory(String uid) => _loadModel(
-    uid,
-    'inventory',
-    PlayerInventory.fromMap,
-  );
+  Future<PlayerDataResult<PlayerInventory>> loadInventory(String uid) =>
+      _loadModel(uid, 'inventory', PlayerInventory.fromMap);
 
   @override
-  Future<PlayerSettings?> loadSettings(String uid) => _loadModel(
-    uid,
-    'settings',
-    PlayerSettings.fromMap,
-  );
+  Future<PlayerDataResult<PlayerSettings>> loadSettings(String uid) =>
+      _loadModel(uid, 'settings', PlayerSettings.fromMap);
 
-  Future<T?> _loadModel<T>(
+  Future<PlayerDataResult<T>> _loadModel<T>(
     String uid,
     String domain,
     T Function(Map<String, Object?>) decode,
   ) => _guard('load $domain', () async {
     final snapshot = await _domainDocument(uid, domain).get();
-    final data = snapshot.data();
-    return data == null ? null : decode(data);
+    return playerDataResultFromDocument<T>(
+      domain: domain,
+      exists: snapshot.exists,
+      data: snapshot.data(),
+      decode: decode,
+    );
   });
 
   @override
   Future<void> saveSettings(String uid, PlayerSettings settings) => _guard(
     'save settings',
-    () => _domainDocument(uid, 'settings').set(settings.toMap(), SetOptions(merge: true)),
+    () => _domainDocument(
+      uid,
+      'settings',
+    ).set(settings.toMap(), SetOptions(merge: true)),
   );
 
   Map<String, Object?> _profileToFirestore(PlayerProfile profile) => {
@@ -179,4 +176,22 @@ class FirestorePlayerDataSource implements PlayerDataSource {
       );
     }
   }
+}
+
+/// Maps Firestore's document-existence metadata separately from decoded model
+/// contents so an empty/default-valued document remains present.
+@visibleForTesting
+PlayerDataResult<T> playerDataResultFromDocument<T>({
+  required String domain,
+  required bool exists,
+  required Map<String, dynamic>? data,
+  required T Function(Map<String, Object?>) decode,
+}) {
+  if (!exists) return PlayerDataResult<T>.missing();
+  if (data == null) {
+    throw PlayerDataAccessException(
+      'load $domain failed because the existing document has no data.',
+    );
+  }
+  return PlayerDataResult<T>.present(decode(Map<String, Object?>.from(data)));
 }

@@ -1,4 +1,5 @@
 import '../../player_models.dart';
+import 'player_data_result.dart';
 
 /// Repository boundary consumed by application features.
 ///
@@ -14,11 +15,11 @@ abstract interface class PlayerRepository {
     required String? photoUrl,
   });
 
-  Future<PlayerProgress?> loadProgress();
+  Future<PlayerDataResult<PlayerProgress>> loadProgress();
 
-  Future<PlayerInventory?> loadInventory();
+  Future<PlayerDataResult<PlayerInventory>> loadInventory();
 
-  Future<PlayerSettings?> loadSettings();
+  Future<PlayerDataResult<PlayerSettings>> loadSettings();
 
   Future<void> saveSettings(PlayerSettings settings);
 }

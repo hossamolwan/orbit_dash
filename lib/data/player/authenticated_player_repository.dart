@@ -1,6 +1,7 @@
 import '../../player_identity.dart';
 import '../../player_models.dart';
 import 'player_data_source.dart';
+import 'player_data_result.dart';
 import 'player_repository.dart';
 
 /// Coordinates player data access using the UID from the authentication layer.
@@ -46,14 +47,16 @@ class AuthenticatedPlayerRepository implements PlayerRepository {
   );
 
   @override
-  Future<PlayerProgress?> loadProgress() async => _dataSource.loadProgress(_uid);
+  Future<PlayerDataResult<PlayerProgress>> loadProgress() async =>
+      _dataSource.loadProgress(_uid);
 
   @override
-  Future<PlayerInventory?> loadInventory() async =>
+  Future<PlayerDataResult<PlayerInventory>> loadInventory() async =>
       _dataSource.loadInventory(_uid);
 
   @override
-  Future<PlayerSettings?> loadSettings() async => _dataSource.loadSettings(_uid);
+  Future<PlayerDataResult<PlayerSettings>> loadSettings() async =>
+      _dataSource.loadSettings(_uid);
 
   @override
   Future<void> saveSettings(PlayerSettings settings) async =>

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:orbit_dash/data/player/player_lifecycle_coordinator.dart';
+import 'package:orbit_dash/data/player/player_data_result.dart';
 import 'package:orbit_dash/data/player/player_repository.dart';
 import 'package:orbit_dash/player_identity.dart';
 import 'package:orbit_dash/player_models.dart';
@@ -27,9 +28,18 @@ void main() {
         final session = harness.coordinator.state.session!;
         expect(session.identity.id, 'player-a');
         expect(session.profile, _profile('player-a'));
-        expect(session.progress, const PlayerProgress(level: 4, xp: 12));
-        expect(session.inventory.ownedSkinIds, {'nebula'});
-        expect(session.settings, const PlayerSettings(musicEnabled: false));
+        expect(session.progress.isPresent, isTrue);
+        expect(
+          session.progress.requireValue,
+          const PlayerProgress(level: 4, xp: 12),
+        );
+        expect(session.inventory.isPresent, isTrue);
+        expect(session.inventory.requireValue.ownedSkinIds, {'nebula'});
+        expect(session.settings.isPresent, isTrue);
+        expect(
+          session.settings.requireValue,
+          const PlayerSettings(musicEnabled: false),
+        );
         expect(repository.ensureProfileCalls, 0);
         await harness.dispose();
       },
@@ -84,7 +94,7 @@ void main() {
       },
     );
 
-    test('uses in-memory defaults for missing optional documents', () async {
+    test('snapshot preserves missing optional documents', () async {
       final harness = _Harness(
         _FakeIdentityService(_authenticated('player-a')),
         _FakePlayerRepository(profile: _profile('player-a')),
@@ -93,10 +103,42 @@ void main() {
       await harness.coordinator.start();
 
       final session = harness.coordinator.state.session!;
-      expect(session.progress, const PlayerProgress());
-      expect(session.inventory.ownedSkinIds, isEmpty);
-      expect(session.inventory.ownedItemIds, isEmpty);
-      expect(session.settings, const PlayerSettings());
+      expect(session.progress.isMissing, isTrue);
+      expect(session.progress.value, isNull);
+      expect(session.inventory.isMissing, isTrue);
+      expect(session.inventory.value, isNull);
+      expect(session.settings.isMissing, isTrue);
+      expect(session.settings.value, isNull);
+      await harness.dispose();
+    });
+
+    test('snapshot preserves present documents containing defaults', () async {
+      final repository = _FakePlayerRepository(
+        profile: _profile('player-a'),
+        progressResult: const PlayerDataResult<PlayerProgress>.present(
+          PlayerProgress(),
+        ),
+        inventoryResult: PlayerDataResult<PlayerInventory>.present(
+          PlayerInventory(),
+        ),
+        settingsResult: const PlayerDataResult<PlayerSettings>.present(
+          PlayerSettings(),
+        ),
+      );
+      final harness = _Harness(
+        _FakeIdentityService(_authenticated('player-a')),
+        repository,
+      );
+
+      await harness.coordinator.start();
+
+      final session = harness.coordinator.state.session!;
+      expect(session.progress.isPresent, isTrue);
+      expect(session.progress.requireValue, const PlayerProgress());
+      expect(session.inventory.isPresent, isTrue);
+      expect(session.inventory.requireValue.ownedItemIds, isEmpty);
+      expect(session.settings.isPresent, isTrue);
+      expect(session.settings.requireValue, const PlayerSettings());
       await harness.dispose();
     });
 
@@ -447,6 +489,9 @@ class _FakePlayerRepository implements PlayerRepository {
     this.progress,
     this.inventory,
     this.settings,
+    this.progressResult,
+    this.inventoryResult,
+    this.settingsResult,
   });
 
   PlayerProfile? profile;
@@ -454,6 +499,9 @@ class _FakePlayerRepository implements PlayerRepository {
   PlayerProgress? progress;
   PlayerInventory? inventory;
   PlayerSettings? settings;
+  final PlayerDataResult<PlayerProgress>? progressResult;
+  final PlayerDataResult<PlayerInventory>? inventoryResult;
+  final PlayerDataResult<PlayerSettings>? settingsResult;
   Completer<PlayerProfile?>? profileCompleter;
   final Completer<void> profileLoadStarted = Completer<void>();
   Object? profileError;
@@ -490,21 +538,30 @@ class _FakePlayerRepository implements PlayerRepository {
   }) => throw UnimplementedError();
 
   @override
-  Future<PlayerProgress?> loadProgress() async {
+  Future<PlayerDataResult<PlayerProgress>> loadProgress() async {
     await _countAndMaybeFail('progress');
-    return progress;
+    return progressResult ??
+        (progress == null
+            ? const PlayerDataResult<PlayerProgress>.missing()
+            : PlayerDataResult<PlayerProgress>.present(progress!));
   }
 
   @override
-  Future<PlayerInventory?> loadInventory() async {
+  Future<PlayerDataResult<PlayerInventory>> loadInventory() async {
     await _countAndMaybeFail('inventory');
-    return inventory;
+    return inventoryResult ??
+        (inventory == null
+            ? const PlayerDataResult<PlayerInventory>.missing()
+            : PlayerDataResult<PlayerInventory>.present(inventory!));
   }
 
   @override
-  Future<PlayerSettings?> loadSettings() async {
+  Future<PlayerDataResult<PlayerSettings>> loadSettings() async {
     await _countAndMaybeFail('settings');
-    return settings;
+    return settingsResult ??
+        (settings == null
+            ? const PlayerDataResult<PlayerSettings>.missing()
+            : PlayerDataResult<PlayerSettings>.present(settings!));
   }
 
   @override

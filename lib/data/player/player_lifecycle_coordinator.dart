@@ -3,6 +3,7 @@ import 'dart:async';
 import '../../player_identity.dart';
 import '../../player_models.dart';
 import 'create_player_repository.dart';
+import 'player_data_result.dart';
 import 'player_repository.dart';
 
 typedef PlayerRepositoryFactory = Future<PlayerRepository> Function(
@@ -66,9 +67,9 @@ class PlayerSessionSnapshot {
 
   final PlayerIdentity identity;
   final PlayerProfile profile;
-  final PlayerProgress progress;
-  final PlayerInventory inventory;
-  final PlayerSettings settings;
+  final PlayerDataResult<PlayerProgress> progress;
+  final PlayerDataResult<PlayerInventory> inventory;
+  final PlayerDataResult<PlayerSettings> settings;
 }
 
 class PlayerLifecycleState {
@@ -274,7 +275,7 @@ class PlayerLifecycleCoordinator {
       try {
         final result = await session.repository!.loadProgress();
         if (!_isCurrent(session)) return;
-        session.progress = result ?? const PlayerProgress();
+        session.progress = result;
         session.progressLoaded = true;
       } catch (error, stackTrace) {
         _failSession(
@@ -292,7 +293,7 @@ class PlayerLifecycleCoordinator {
       try {
         final result = await session.repository!.loadInventory();
         if (!_isCurrent(session)) return;
-        session.inventory = result ?? PlayerInventory();
+        session.inventory = result;
         session.inventoryLoaded = true;
       } catch (error, stackTrace) {
         _failSession(
@@ -310,7 +311,7 @@ class PlayerLifecycleCoordinator {
       try {
         final result = await session.repository!.loadSettings();
         if (!_isCurrent(session)) return;
-        session.settings = result ?? const PlayerSettings();
+        session.settings = result;
         session.settingsLoaded = true;
       } catch (error, stackTrace) {
         _failSession(
@@ -479,9 +480,9 @@ class _PlayerSession {
   final PlayerIdentity identity;
   PlayerRepository? repository;
   PlayerProfile? profile;
-  PlayerProgress? progress;
-  PlayerInventory? inventory;
-  PlayerSettings? settings;
+  PlayerDataResult<PlayerProgress>? progress;
+  PlayerDataResult<PlayerInventory>? inventory;
+  PlayerDataResult<PlayerSettings>? settings;
   bool progressLoaded = false;
   bool inventoryLoaded = false;
   bool settingsLoaded = false;
