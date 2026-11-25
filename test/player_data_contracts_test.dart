@@ -8,23 +8,22 @@ void main() {
   group('AuthenticatedPlayerRepository', () {
     test('scopes reads and writes to the authenticated identity', () async {
       final source = _FakePlayerDataSource();
-      final repository = AuthenticatedPlayerRepository(
-        _FakeIdentityService(
-          const PlayerIdentitySnapshot(
-            status: PlayerIdentityStatus.authenticated,
-            identity: PlayerIdentity(id: 'authenticated-uid'),
+      final identityService = _FakeIdentityService(
+        const PlayerIdentitySnapshot(
+          status: PlayerIdentityStatus.authenticated,
+          identity: PlayerIdentity(
+            id: 'authenticated-uid',
+            displayName: 'Pilot',
+            photoUrl: 'https://example.test/pilot.png',
           ),
         ),
-        source,
       );
+      final repository = AuthenticatedPlayerRepository(identityService, source);
 
       await repository.loadProfile();
       expect(source.lastUid, 'authenticated-uid');
 
-      final created = await repository.ensureProfile(
-        displayName: 'Pilot',
-        photoUrl: 'https://example.test/pilot.png',
-      );
+      final created = await repository.ensureProfile();
       expect(created.uid, 'authenticated-uid');
       expect(created.displayName, 'Pilot');
       expect(created.photoUrl, 'https://example.test/pilot.png');
@@ -51,19 +50,58 @@ void main() {
       expect(source.savedSettings, const PlayerSettings(musicEnabled: false));
     });
 
-    test('does not access data without a recoverable authenticated identity', () {
+    test('rejects construction without a recoverable identity before data access', () {
       final source = _FakePlayerDataSource();
-      final repository = AuthenticatedPlayerRepository(
+      expect(
+        () => AuthenticatedPlayerRepository(
         _FakeIdentityService(
           const PlayerIdentitySnapshot(
             status: PlayerIdentityStatus.unauthenticated,
           ),
         ),
         source,
+        ),
+        throwsA(isA<PlayerIdentityException>()),
+      );
+      expect(source.lastUid, isNull);
+    });
+
+    test('repository remains bound to its creation identity after account switch', () async {
+      final source = _FakePlayerDataSource();
+      final identityService = _FakeIdentityService(
+        const PlayerIdentitySnapshot(
+          status: PlayerIdentityStatus.authenticated,
+          identity: PlayerIdentity(id: 'player-a', displayName: 'A'),
+        ),
+      );
+      final repository = AuthenticatedPlayerRepository(identityService, source);
+
+      identityService.currentState = const PlayerIdentitySnapshot(
+        status: PlayerIdentityStatus.authenticated,
+        identity: PlayerIdentity(id: 'player-b', displayName: 'B'),
+      );
+      await repository.loadProgress();
+      expect(source.lastUid, 'player-a');
+      final profile = await repository.ensureProfile();
+      expect(profile.uid, 'player-a');
+      expect(profile.displayName, 'A');
+    });
+
+    test('profile seed preserves explicitly nullable photo URL', () async {
+      final source = _FakePlayerDataSource();
+      final repository = AuthenticatedPlayerRepository(
+        _FakeIdentityService(
+          const PlayerIdentitySnapshot(
+            status: PlayerIdentityStatus.authenticated,
+            identity: PlayerIdentity(id: 'uid', displayName: 'Pilot'),
+          ),
+        ),
+        source,
       );
 
-      expect(repository.loadProgress(), throwsA(isA<PlayerIdentityException>()));
-      expect(source.lastUid, isNull);
+      final profile = await repository.ensureProfile();
+      expect(profile.photoUrl, isNull);
+      expect(source.createdProfile?.photoUrl, isNull);
     });
 
     test('preserves backend-neutral data access failures', () async {
@@ -103,10 +141,12 @@ void main() {
 }
 
 class _FakeIdentityService implements PlayerIdentityService {
-  const _FakeIdentityService(this.state);
+  _FakeIdentityService(this.currentState);
+
+  PlayerIdentitySnapshot currentState;
 
   @override
-  final PlayerIdentitySnapshot state;
+  PlayerIdentitySnapshot get state => currentState;
 
   @override
   Stream<PlayerIdentitySnapshot> get states => Stream.value(state);
@@ -126,6 +166,7 @@ class _FakePlayerDataSource implements PlayerDataSource {
   String? lastDisplayName;
   String? lastPhotoUrl;
   PlayerSettings? savedSettings;
+  PlayerProfile? createdProfile;
   PlayerDataAccessException? profileError;
 
   @override
@@ -138,6 +179,7 @@ class _FakePlayerDataSource implements PlayerDataSource {
   @override
   Future<PlayerProfile> createProfileIfAbsent(PlayerProfile profile) async {
     lastUid = profile.uid;
+    createdProfile = profile;
     return profile;
   }
 

@@ -8,28 +8,27 @@ import 'player_repository.dart';
 /// This class performs no persistence itself. It leaves storage behavior to
 /// [PlayerDataSource], including the atomic create-if-absent operation.
 class AuthenticatedPlayerRepository implements PlayerRepository {
-  const AuthenticatedPlayerRepository(this._identityService, this._dataSource);
+  AuthenticatedPlayerRepository(
+    PlayerIdentityService identityService,
+    this._dataSource,
+  ) : _identity = identityService.state.requireRecoverableIdentity();
 
-  final PlayerIdentityService _identityService;
+  final PlayerIdentity _identity;
   final PlayerDataSource _dataSource;
 
-  String get _uid =>
-      _identityService.state.requireRecoverableIdentity().id;
+  String get _uid => _identity.id;
 
   @override
   Future<PlayerProfile?> loadProfile() async => _dataSource.loadProfile(_uid);
 
   @override
-  Future<PlayerProfile> ensureProfile({
-    required String displayName,
-    String? photoUrl,
-  }) async {
+  Future<PlayerProfile> ensureProfile() async {
     final now = DateTime.now().toUtc();
     return _dataSource.createProfileIfAbsent(
       PlayerProfile(
         uid: _uid,
-        displayName: displayName,
-        photoUrl: photoUrl,
+        displayName: _identity.displayName ?? '',
+        photoUrl: _identity.photoUrl,
         createdAt: now,
         updatedAt: now,
       ),

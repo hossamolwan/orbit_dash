@@ -7,10 +7,7 @@ import '../../player_models.dart';
 abstract interface class PlayerRepository {
   Future<PlayerProfile?> loadProfile();
 
-  Future<PlayerProfile> ensureProfile({
-    required String displayName,
-    String? photoUrl,
-  });
+  Future<PlayerProfile> ensureProfile();
 
   Future<PlayerProfile> updateProfile({
     required String displayName,

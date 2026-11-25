@@ -15,8 +15,14 @@ enum PlayerIdentityFailureCode {
 }
 
 class PlayerIdentity {
-  const PlayerIdentity({required this.id});
+  const PlayerIdentity({
+    required this.id,
+    this.displayName,
+    this.photoUrl,
+  });
   final String id;
+  final String? displayName;
+  final String? photoUrl;
 }
 
 class PlayerIdentitySnapshot {

@@ -56,7 +56,11 @@ class FirebasePlayerIdentityProvider implements PlayerIdentityProvider {
   static PlayerIdentity? _mapUser(User? user) =>
       user == null || user.isAnonymous ? null : _identity(user);
 
-  static PlayerIdentity _identity(User user) => PlayerIdentity(id: user.uid);
+  static PlayerIdentity _identity(User user) => PlayerIdentity(
+    id: user.uid,
+    displayName: user.displayName,
+    photoUrl: user.photoURL,
+  );
 
   static PlayerIdentityException _mapAuthError(FirebaseAuthException error) {
     final code = switch (error.code) {

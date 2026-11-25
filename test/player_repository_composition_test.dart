@@ -52,7 +52,11 @@ class _FakeIdentityService implements PlayerIdentityService {
   @override
   PlayerIdentitySnapshot get state => const PlayerIdentitySnapshot(
     status: PlayerIdentityStatus.authenticated,
-    identity: PlayerIdentity(id: 'composition-test-uid'),
+    identity: PlayerIdentity(
+      id: 'composition-test-uid',
+      displayName: 'Composition Pilot',
+      photoUrl: 'https://example.test/composition.png',
+    ),
   );
 
   @override
