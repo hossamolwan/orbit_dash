@@ -2,8 +2,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:orbit_dash/data/player/authenticated_player_repository.dart';
 import 'package:orbit_dash/data/player/player_data_source.dart';
 import 'package:orbit_dash/data/player/player_data_result.dart';
+import 'package:orbit_dash/data/player/player_sync_write.dart';
 import 'package:orbit_dash/player_identity.dart';
 import 'package:orbit_dash/player_models.dart';
+import 'package:orbit_dash/player_sync_contracts.dart';
 
 void main() {
   group('AuthenticatedPlayerRepository', () {
@@ -223,6 +225,30 @@ class _FakePlayerDataSource implements PlayerDataSource {
       const PlayerDataResult<PlayerInventory>.missing();
   PlayerDataResult<PlayerSettings> settingsResult =
       const PlayerDataResult<PlayerSettings>.missing();
+
+  @override
+  Future<PlayerSyncCloudSnapshot<PlayerSyncProgress>> loadSyncProgress(
+    String uid,
+  ) => throw UnimplementedError();
+
+  @override
+  Future<PlayerSyncCloudSnapshot<PlayerSyncInventory>> loadSyncInventory(
+    String uid,
+  ) => throw UnimplementedError();
+
+  @override
+  Future<PlayerSyncWriteResult> saveSyncProgress({
+    required String uid,
+    required PlayerSyncProgress progress,
+    required int expectedRevision,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<PlayerSyncWriteResult> saveSyncInventory({
+    required String uid,
+    required PlayerSyncInventory inventory,
+    required int expectedRevision,
+  }) => throw UnimplementedError();
 
   @override
   Future<PlayerProfile?> loadProfile(String uid) async {

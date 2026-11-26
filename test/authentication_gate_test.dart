@@ -6,11 +6,13 @@ import 'package:orbit_dash/audio/game_audio_manager.dart';
 import 'package:orbit_dash/data/player/player_lifecycle_coordinator.dart';
 import 'package:orbit_dash/data/player/player_data_result.dart';
 import 'package:orbit_dash/data/player/player_repository.dart';
+import 'package:orbit_dash/data/player/player_sync_write.dart';
 import 'package:orbit_dash/account_scoped_preferences.dart';
 import 'package:orbit_dash/gem_wallet.dart';
 import 'package:orbit_dash/main.dart';
 import 'package:orbit_dash/player_identity.dart';
 import 'package:orbit_dash/player_models.dart';
+import 'package:orbit_dash/player_sync_contracts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -772,6 +774,26 @@ class _FakePlayerRepository implements PlayerRepository {
   int profileFailuresRemaining;
   int loadProfileCalls = 0;
   int ensureProfileCalls = 0;
+
+  @override
+  Future<PlayerSyncCloudSnapshot<PlayerSyncProgress>> loadSyncProgress() =>
+      throw UnimplementedError();
+
+  @override
+  Future<PlayerSyncCloudSnapshot<PlayerSyncInventory>> loadSyncInventory() =>
+      throw UnimplementedError();
+
+  @override
+  Future<PlayerSyncWriteResult> saveSyncProgress({
+    required PlayerSyncProgress progress,
+    required int expectedRevision,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<PlayerSyncWriteResult> saveSyncInventory({
+    required PlayerSyncInventory inventory,
+    required int expectedRevision,
+  }) => throw UnimplementedError();
 
   @override
   Future<PlayerProfile?> loadProfile() async {

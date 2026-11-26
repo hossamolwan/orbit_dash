@@ -1,8 +1,10 @@
 import '../../player_identity.dart';
 import '../../player_models.dart';
+import '../../player_sync_contracts.dart';
 import 'player_data_source.dart';
 import 'player_data_result.dart';
 import 'player_repository.dart';
+import 'player_sync_write.dart';
 
 /// Coordinates player data access using the UID from the authentication layer.
 ///
@@ -18,6 +20,34 @@ class AuthenticatedPlayerRepository implements PlayerRepository {
   final PlayerDataSource _dataSource;
 
   String get _uid => _identity.id;
+
+  @override
+  Future<PlayerSyncCloudSnapshot<PlayerSyncProgress>> loadSyncProgress() =>
+      _dataSource.loadSyncProgress(_uid);
+
+  @override
+  Future<PlayerSyncCloudSnapshot<PlayerSyncInventory>> loadSyncInventory() =>
+      _dataSource.loadSyncInventory(_uid);
+
+  @override
+  Future<PlayerSyncWriteResult> saveSyncProgress({
+    required PlayerSyncProgress progress,
+    required int expectedRevision,
+  }) => _dataSource.saveSyncProgress(
+    uid: _uid,
+    progress: progress,
+    expectedRevision: expectedRevision,
+  );
+
+  @override
+  Future<PlayerSyncWriteResult> saveSyncInventory({
+    required PlayerSyncInventory inventory,
+    required int expectedRevision,
+  }) => _dataSource.saveSyncInventory(
+    uid: _uid,
+    inventory: inventory,
+    expectedRevision: expectedRevision,
+  );
 
   @override
   Future<PlayerProfile?> loadProfile() async => _dataSource.loadProfile(_uid);

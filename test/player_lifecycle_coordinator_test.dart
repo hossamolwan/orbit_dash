@@ -4,8 +4,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:orbit_dash/data/player/player_lifecycle_coordinator.dart';
 import 'package:orbit_dash/data/player/player_data_result.dart';
 import 'package:orbit_dash/data/player/player_repository.dart';
+import 'package:orbit_dash/data/player/player_sync_write.dart';
 import 'package:orbit_dash/player_identity.dart';
 import 'package:orbit_dash/player_models.dart';
+import 'package:orbit_dash/player_sync_contracts.dart';
 
 void main() {
   group('PlayerLifecycleCoordinator', () {
@@ -510,6 +512,26 @@ class _FakePlayerRepository implements PlayerRepository {
   final Map<String, int> domainCalls = {};
   int loadProfileCalls = 0;
   int ensureProfileCalls = 0;
+
+  @override
+  Future<PlayerSyncCloudSnapshot<PlayerSyncProgress>> loadSyncProgress() =>
+      throw UnimplementedError();
+
+  @override
+  Future<PlayerSyncCloudSnapshot<PlayerSyncInventory>> loadSyncInventory() =>
+      throw UnimplementedError();
+
+  @override
+  Future<PlayerSyncWriteResult> saveSyncProgress({
+    required PlayerSyncProgress progress,
+    required int expectedRevision,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<PlayerSyncWriteResult> saveSyncInventory({
+    required PlayerSyncInventory inventory,
+    required int expectedRevision,
+  }) => throw UnimplementedError();
 
   int get loadProgressCalls => domainCalls['progress'] ?? 0;
   int get loadInventoryCalls => domainCalls['inventory'] ?? 0;

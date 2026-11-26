@@ -50,8 +50,48 @@ the explicit `defaults()` value for a new player after making that decision.
 Only fields in schema v1 are accepted; a future schema version requires an
 explicit contract update.
 
-These contracts do not implement cloud writes, revisions, conflict resolution,
-local migration, or offline queues. Current local stores remain authoritative
-for gameplay. Future sync work must add a recoverable migration path, preserve
-invalid/unknown data for review, and define field-specific merge behavior
-before writing to Firestore.
+## Cloud write foundation (Milestone 2)
+
+`PlayerSyncRepository` exposes explicit load and save methods for the
+authenticated account's Progress and Inventory contracts. The Firestore data
+source stores each contract in its existing domain document:
+
+- `players/{uid}/progress/data`
+- `players/{uid}/inventory/data`
+
+The canonical contract and its revision are stored in a nested `sync` envelope
+(`sync.revision`, `sync.payload`). This keeps the strict contract fields
+separate from legacy fields already present in each document. Writes use a
+Firestore transaction and `SetOptions(merge: true)` on only the `sync` field;
+they do not replace the domain document or touch the other domain, Settings,
+Profile, or sibling collections. Inventory payloads contain only canonical
+cosmetic IDs/equipment and never wallet balance or purchase records.
+
+The repository captures the authenticated UID when constructed and does not
+accept a UID in its public sync methods. The caller first loads a sync snapshot
+and passes its domain-specific revision as `expectedRevision`. New or legacy
+documents without a `sync` envelope have revision 0. A successful transaction
+increments the selected domain's revision. If the stored revision differs,
+the write fails with `staleRevision`; there is no application-level retry of
+that stale payload. Firestore may rerun a transaction callback on contention,
+and each callback attempt rereads and checks `expectedRevision`. Progress and
+Inventory revisions are independent. If the expected revision matches and
+the canonical payload is unchanged, the operation succeeds as a no-op and
+returns the current revision without issuing a write. Existing malformed sync
+envelopes or payloads are rejected without replacement.
+
+Invalid payloads, invalid expected revisions, stale revisions, malformed
+stored data, Firestore permission denials, and other service failures have
+distinct backend-neutral write failure codes. No Firebase exception details
+are exposed through the sync write API.
+Existing legacy `loadProgress`/`loadInventory` behavior remains unchanged; the
+new sync snapshot methods read only the nested canonical envelope.
+
+This is an explicit cloud persistence capability only. No automatic sync,
+gameplay-triggered writes, local migration, offline queue, retry policy,
+conflict resolution, entitlement verification, or Firestore Rules changes are
+included. Local stores remain authoritative for gameplay, and sync writes do
+not mutate them. The expected-revision mechanism prevents concurrent stale
+domain writes only when callers use a freshly loaded snapshot; it does not
+reconcile divergent local and cloud values or make local ownership proof of
+purchase entitlement.

@@ -1,4 +1,5 @@
 import '../../player_models.dart';
+import 'player_sync_write.dart';
 import 'player_data_result.dart';
 
 /// Storage boundary for player data.
@@ -8,7 +9,7 @@ import 'player_data_result.dart';
 /// document presence with [PlayerDataResult]. Implementations should translate
 /// backend errors into [PlayerDataAccessException] and must not expose
 /// backend exception types.
-abstract interface class PlayerDataSource {
+abstract interface class PlayerDataSource implements PlayerSyncDataSource {
   Future<PlayerProfile?> loadProfile(String uid);
 
   /// Creates [profile] only when its UID has no profile yet. Returns the
