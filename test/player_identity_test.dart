@@ -66,6 +66,30 @@ void main() {
       expect(provider.googleSignInCount, 1);
       await service.dispose();
     });
+
+    test(
+      'retry after timeout reuses the still-pending Google operation',
+      () async {
+        final pendingSignIn = Completer<PlayerIdentity>();
+        final provider = _FakeIdentityProvider(signInCompleter: pendingSignIn);
+        final service = PlayerIdentityRepository(provider);
+
+        await expectLater(
+          service.signInWithGoogle().timeout(const Duration(milliseconds: 1)),
+          throwsA(isA<TimeoutException>()),
+        );
+        final retry = service.signInWithGoogle();
+        expect(provider.googleSignInCount, 1);
+
+        pendingSignIn.complete(const PlayerIdentity(id: 'late-provider-uid'));
+        expect(await retry, const PlayerIdentity(id: 'late-provider-uid'));
+        expect(
+          service.state.requireRecoverableIdentity().id,
+          'late-provider-uid',
+        );
+        await service.dispose();
+      },
+    );
   });
 
   test(
@@ -102,6 +126,7 @@ class _FakeIdentityProvider implements PlayerIdentityProvider {
     this.currentIdentity,
     this.signInError,
     this.signInDelay = false,
+    this.signInCompleter,
   });
   final StreamController<PlayerIdentity?> _changes =
       StreamController<PlayerIdentity?>.broadcast(sync: true);
@@ -109,6 +134,7 @@ class _FakeIdentityProvider implements PlayerIdentityProvider {
   PlayerIdentity? currentIdentity;
   final PlayerIdentityException? signInError;
   final bool signInDelay;
+  final Completer<PlayerIdentity>? signInCompleter;
   int googleSignInCount = 0;
 
   @override
@@ -116,6 +142,7 @@ class _FakeIdentityProvider implements PlayerIdentityProvider {
   @override
   Future<PlayerIdentity> signInWithGoogle() async {
     googleSignInCount++;
+    if (signInCompleter case final completer?) return completer.future;
     if (signInDelay) {
       await Future<void>.delayed(const Duration(milliseconds: 5));
     }

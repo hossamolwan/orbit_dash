@@ -370,10 +370,56 @@ void main() {
     expect(find.byType(OrbitGamePage), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
     expect(coordinator!.start, throwsStateError);
+    expect(service.disposeCalls, 0);
+    expect(service.hasListeners, isFalse);
     service.emit(_authenticated('another-player'));
     await tester.pump();
   });
+
+  testWidgets('gate disposes a factory-created service exactly once', (
+    tester,
+  ) async {
+    final service = _FakeIdentityService();
+    await tester.pumpWidget(
+      OrbitDashApp(identityServiceFactory: () async => service),
+    );
+    await _pumpFrames(tester);
+    expect(service.hasListeners, isTrue);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    await tester.pump();
+    expect(service.disposeCalls, 1);
+    expect(service.hasListeners, isFalse);
+  });
+
+  testWidgets(
+    'factory service completing after disposal is disposed unattached',
+    (tester) async {
+      final serviceCreation = Completer<PlayerIdentityService>();
+      final service = _FakeIdentityService();
+      var coordinatorCreations = 0;
+      await tester.pumpWidget(
+        OrbitDashApp(
+          identityServiceFactory: () => serviceCreation.future,
+          playerLifecycleCoordinatorFactory: (identityService) {
+            coordinatorCreations++;
+            return PlayerLifecycleCoordinator(identityService: identityService);
+          },
+        ),
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      serviceCreation.complete(service);
+      await tester.pump();
+
+      expect(service.disposeCalls, 1);
+      expect(service.hasListeners, isFalse);
+      expect(coordinatorCreations, 0);
+    },
+  );
 
   testWidgets('Google chooser cancellation does not unlock gameplay', (
     tester,
@@ -490,9 +536,106 @@ void main() {
     expect(service.signInCount, 1);
     expect(find.byType(OrbitGamePage), findsOneWidget);
   });
+
+  testWidgets('late authentication update recovers after sign-in timeout', (
+    tester,
+  ) async {
+    final service = _FakeIdentityService(
+      initialState: const PlayerIdentitySnapshot(
+        status: PlayerIdentityStatus.unauthenticated,
+      ),
+    );
+    final pendingSignIn = Completer<PlayerIdentity>();
+    service.onSignIn = () => pendingSignIn.future;
+    await tester.pumpWidget(_testApp(service));
+    await tester.pump();
+
+    await tester.tap(find.text('CONTINUE WITH GOOGLE'));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 46));
+    expect(
+      find.text('Sign-in took too long. Check your connection and retry.'),
+      findsOneWidget,
+    );
+
+    service.emit(_authenticated('late-authenticated-player'));
+    await _pumpFrames(tester);
+    pendingSignIn.completeError(
+      const PlayerIdentityException(PlayerIdentityFailureCode.unavailable),
+    );
+    await tester.pump();
+
+    expect(find.byType(OrbitGamePage), findsOneWidget);
+    expect(
+      find.text('Sign-in took too long. Check your connection and retry.'),
+      findsNothing,
+    );
+    expect(service.signInCount, 1);
+  });
+
+  testWidgets('a timeout cannot replace a newer authenticated stream update', (
+    tester,
+  ) async {
+    final service = _FakeIdentityService(
+      initialState: const PlayerIdentitySnapshot(
+        status: PlayerIdentityStatus.unauthenticated,
+      ),
+    );
+    final pendingSignIn = Completer<PlayerIdentity>();
+    service.onSignIn = () => pendingSignIn.future;
+    await tester.pumpWidget(_testApp(service));
+    await tester.pump();
+    await tester.tap(find.text('CONTINUE WITH GOOGLE'));
+    await tester.pump();
+
+    service.emit(_authenticated('authenticated-before-timeout'));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 46));
+
+    expect(service.signInCount, 1);
+    expect(
+      find.text('Sign-in took too long. Check your connection and retry.'),
+      findsNothing,
+    );
+    expect(find.byType(OrbitGamePage), findsOneWidget);
+
+    pendingSignIn.complete(
+      const PlayerIdentity(id: 'authenticated-before-timeout'),
+    );
+    await tester.pump();
+  });
+
+  testWidgets(
+    'late initialization completion starts no lifecycle work after disposal',
+    (tester) async {
+      final initializeGate = Completer<void>();
+      final service = _FakeIdentityService()..initializeGate = initializeGate;
+      var repositoryCreations = 0;
+      await tester.pumpWidget(
+        _testApp(
+          service,
+          repositoryFactory: (_) {
+            repositoryCreations++;
+            return _FakePlayerRepository(uid: 'late-initialization');
+          },
+        ),
+      );
+      await tester.pump();
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      service.emit(_authenticated('late-initialization'));
+      initializeGate.complete();
+      await tester.pump();
+      await tester.pump();
+
+      expect(repositoryCreations, 0);
+      expect(service.disposeCalls, 0);
+    },
+  );
 }
 
-class _FakeIdentityService implements PlayerIdentityService {
+class _FakeIdentityService
+    implements PlayerIdentityService, DisposablePlayerIdentityService {
   _FakeIdentityService({
     this.initialState = const PlayerIdentitySnapshot(
       status: PlayerIdentityStatus.initializing,
@@ -504,9 +647,12 @@ class _FakeIdentityService implements PlayerIdentityService {
   PlayerIdentitySnapshot initialState;
   Future<PlayerIdentity> Function()? onSignIn;
   Future<void>? _initialization;
+  Completer<void>? initializeGate;
   Object? initializeError;
   int initializeCalls = 0;
   int signInCount = 0;
+  int disposeCalls = 0;
+  bool get hasListeners => _states.hasListener;
 
   @override
   PlayerIdentitySnapshot get state => initialState;
@@ -517,6 +663,7 @@ class _FakeIdentityService implements PlayerIdentityService {
 
   Future<void> _performInitialization() async {
     initializeCalls++;
+    await initializeGate?.future;
     if (initializeError case final error?) throw error;
   }
 
@@ -534,6 +681,12 @@ class _FakeIdentityService implements PlayerIdentityService {
   void emit(PlayerIdentitySnapshot next) {
     initialState = next;
     _states.add(next);
+  }
+
+  @override
+  Future<void> dispose() async {
+    disposeCalls++;
+    await _states.close();
   }
 }
 

@@ -71,7 +71,14 @@ abstract interface class PlayerIdentityService {
   Future<String?> getIdToken({bool forceRefresh = false});
 }
 
-class PlayerIdentityRepository implements PlayerIdentityService {
+/// Optional lifecycle contract for identity services that own resources.
+/// Implementing [PlayerIdentityService] alone does not require disposal.
+abstract interface class DisposablePlayerIdentityService {
+  Future<void> dispose();
+}
+
+class PlayerIdentityRepository
+    implements PlayerIdentityService, DisposablePlayerIdentityService {
   PlayerIdentityRepository(this._provider);
   final PlayerIdentityProvider _provider;
   final StreamController<PlayerIdentitySnapshot> _states =
@@ -204,6 +211,7 @@ class PlayerIdentityRepository implements PlayerIdentityService {
     }
   }
 
+  @override
   Future<void> dispose() async {
     await _subscription?.cancel();
     await _states.close();

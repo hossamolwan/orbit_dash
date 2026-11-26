@@ -98,6 +98,9 @@ class _PlayerAuthenticationGateState extends State<PlayerAuthenticationGate> {
   bool _requestInProgress = false;
   bool _playerRetryInProgress = false;
   bool _creatingService = false;
+  bool _disposed = false;
+  bool _ownsIdentityService = false;
+  int _identityUpdateVersion = 0;
   String? _message;
 
   @override
@@ -105,7 +108,7 @@ class _PlayerAuthenticationGateState extends State<PlayerAuthenticationGate> {
     super.initState();
     final injectedService = widget.identityService;
     if (injectedService != null) {
-      _attachService(injectedService);
+      _attachService(injectedService, owned: false);
     } else {
       unawaited(_createAndAttachService());
     }
@@ -113,14 +116,28 @@ class _PlayerAuthenticationGateState extends State<PlayerAuthenticationGate> {
 
   @override
   void dispose() {
-    unawaited(_identitySubscription?.cancel());
-    unawaited(_playerLifecycleSubscription?.cancel());
-    unawaited(_playerLifecycleCoordinator?.dispose());
+    _disposed = true;
+    final identitySubscription = _identitySubscription;
+    final lifecycleSubscription = _playerLifecycleSubscription;
+    final coordinator = _playerLifecycleCoordinator;
+    final service = _ownsIdentityService ? _identityService : null;
+    _identitySubscription = null;
+    _playerLifecycleSubscription = null;
+    _playerLifecycleCoordinator = null;
+    _identityService = null;
+    unawaited(
+      _disposeOwnedResources(
+        coordinator,
+        service,
+        identitySubscription: identitySubscription,
+        lifecycleSubscription: lifecycleSubscription,
+      ),
+    );
     super.dispose();
   }
 
   Future<void> _createAndAttachService() async {
-    if (_creatingService) return;
+    if (_disposed || !mounted || _creatingService) return;
     setState(() {
       _creatingService = true;
       _message = null;
@@ -130,8 +147,11 @@ class _PlayerAuthenticationGateState extends State<PlayerAuthenticationGate> {
     });
     try {
       final service = await widget.identityServiceFactory();
-      if (!mounted) return;
-      _attachService(service);
+      if (_disposed || !mounted) {
+        await _disposeService(service);
+        return;
+      }
+      _attachService(service, owned: true);
     } catch (_) {
       if (mounted) {
         setState(() {
@@ -147,19 +167,34 @@ class _PlayerAuthenticationGateState extends State<PlayerAuthenticationGate> {
     }
   }
 
-  void _attachService(PlayerIdentityService service) {
+  void _attachService(PlayerIdentityService service, {required bool owned}) {
+    if (_disposed || !mounted) {
+      if (owned) unawaited(_disposeService(service));
+      return;
+    }
     if (identical(service, _identityService) &&
         _playerLifecycleCoordinator != null) {
       return;
     }
     unawaited(_identitySubscription?.cancel());
     unawaited(_playerLifecycleSubscription?.cancel());
-    unawaited(_playerLifecycleCoordinator?.dispose());
+    final previousCoordinator = _playerLifecycleCoordinator;
+    final previousService = _ownsIdentityService ? _identityService : null;
+    if (previousCoordinator != null ||
+        (previousService != null && !identical(previousService, service))) {
+      unawaited(
+        _disposeOwnedResources(
+          previousCoordinator,
+          identical(previousService, service) ? null : previousService,
+        ),
+      );
+    }
     final coordinator =
         widget.playerLifecycleCoordinatorFactory?.call(service) ??
         PlayerLifecycleCoordinator(identityService: service);
     setState(() {
       _identityService = service;
+      _ownsIdentityService = owned;
       _identityState = service.state;
       _playerLifecycleCoordinator = coordinator;
       _playerLifecycleState = coordinator.state;
@@ -168,6 +203,7 @@ class _PlayerAuthenticationGateState extends State<PlayerAuthenticationGate> {
     });
     _identitySubscription = service.states.listen((state) {
       if (!mounted || !identical(service, _identityService)) return;
+      _identityUpdateVersion++;
       setState(() {
         _identityState = state;
         if (state.status == PlayerIdentityStatus.authenticated) {
@@ -194,10 +230,11 @@ class _PlayerAuthenticationGateState extends State<PlayerAuthenticationGate> {
   }
 
   Future<void> _initializeService(PlayerIdentityService service) async {
+    final identityUpdateVersion = _identityUpdateVersion;
     try {
       await service.initialize().timeout(const Duration(seconds: 45));
     } on TimeoutException {
-      if (mounted && identical(service, _identityService)) {
+      if (_canApplyFailure(service, identityUpdateVersion)) {
         setState(() {
           _identityState = const PlayerIdentitySnapshot(
             status: PlayerIdentityStatus.unavailable,
@@ -207,7 +244,7 @@ class _PlayerAuthenticationGateState extends State<PlayerAuthenticationGate> {
         });
       }
     } catch (_) {
-      if (mounted && identical(service, _identityService)) {
+      if (_canApplyFailure(service, identityUpdateVersion)) {
         setState(() {
           _identityState = const PlayerIdentitySnapshot(
             status: PlayerIdentityStatus.unavailable,
@@ -220,7 +257,7 @@ class _PlayerAuthenticationGateState extends State<PlayerAuthenticationGate> {
   }
 
   Future<void> _retryPlayerLifecycle() async {
-    if (_playerRetryInProgress) return;
+    if (_disposed || !mounted || _playerRetryInProgress) return;
     final coordinator = _playerLifecycleCoordinator;
     if (coordinator == null) return;
     setState(() => _playerRetryInProgress = true);
@@ -234,13 +271,16 @@ class _PlayerAuthenticationGateState extends State<PlayerAuthenticationGate> {
   }
 
   Future<void> _retryAuthentication() async {
-    if (_requestInProgress || _creatingService) return;
+    if (_disposed || !mounted || _requestInProgress || _creatingService) {
+      return;
+    }
     final service = _identityService;
     if (service == null || service is UnavailablePlayerIdentityService) {
       await _createAndAttachService();
       return;
     }
 
+    final identityUpdateVersion = _identityUpdateVersion;
     setState(() {
       _requestInProgress = true;
       _message = null;
@@ -251,7 +291,7 @@ class _PlayerAuthenticationGateState extends State<PlayerAuthenticationGate> {
     try {
       await service.signInWithGoogle().timeout(const Duration(seconds: 45));
     } on TimeoutException {
-      if (mounted) {
+      if (_canApplyFailure(service, identityUpdateVersion)) {
         setState(() {
           _identityState = const PlayerIdentitySnapshot(
             status: PlayerIdentityStatus.unavailable,
@@ -261,7 +301,8 @@ class _PlayerAuthenticationGateState extends State<PlayerAuthenticationGate> {
         });
       }
     } on PlayerIdentityException catch (error) {
-      if (mounted && error.code == PlayerIdentityFailureCode.canceled) {
+      if (_canApplyFailure(service, identityUpdateVersion) &&
+          error.code == PlayerIdentityFailureCode.canceled) {
         setState(() {
           _identityState = const PlayerIdentitySnapshot(
             status: PlayerIdentityStatus.unauthenticated,
@@ -269,7 +310,7 @@ class _PlayerAuthenticationGateState extends State<PlayerAuthenticationGate> {
           );
           _message = 'Sign-in was canceled. Choose an account to continue.';
         });
-      } else if (mounted) {
+      } else if (_canApplyFailure(service, identityUpdateVersion)) {
         setState(() {
           _identityState = const PlayerIdentitySnapshot(
             status: PlayerIdentityStatus.unavailable,
@@ -279,7 +320,7 @@ class _PlayerAuthenticationGateState extends State<PlayerAuthenticationGate> {
         });
       }
     } catch (_) {
-      if (mounted) {
+      if (_canApplyFailure(service, identityUpdateVersion)) {
         setState(() {
           _identityState = const PlayerIdentitySnapshot(
             status: PlayerIdentityStatus.unavailable,
@@ -289,7 +330,67 @@ class _PlayerAuthenticationGateState extends State<PlayerAuthenticationGate> {
         });
       }
     } finally {
-      if (mounted) setState(() => _requestInProgress = false);
+      if (mounted && !_disposed && identical(service, _identityService)) {
+        setState(() => _requestInProgress = false);
+      }
+    }
+  }
+
+  bool _canApplyFailure(
+    PlayerIdentityService service,
+    int identityUpdateVersion,
+  ) =>
+      mounted &&
+      !_disposed &&
+      identical(service, _identityService) &&
+      !(_identityUpdateVersion > identityUpdateVersion &&
+          _identityState.isAuthenticated);
+
+  Future<void> _disposeService(PlayerIdentityService service) async {
+    if (service is! DisposablePlayerIdentityService) return;
+    try {
+      await (service as DisposablePlayerIdentityService).dispose();
+    } catch (error, stackTrace) {
+      debugPrint('Failed to dispose player identity service: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
+  }
+
+  Future<void> _disposeOwnedResources(
+    PlayerLifecycleCoordinator? coordinator,
+    PlayerIdentityService? service, {
+    StreamSubscription<PlayerIdentitySnapshot>? identitySubscription,
+    StreamSubscription<PlayerLifecycleState>? lifecycleSubscription,
+  }) async {
+    final coordinatorDisposal = coordinator?.dispose();
+    final identityCancellation = identitySubscription?.cancel();
+    final lifecycleCancellation = lifecycleSubscription?.cancel();
+    await Future.wait([
+      _finishDisposalStep(
+        coordinatorDisposal,
+        'Failed to dispose player lifecycle coordinator',
+      ),
+      _finishDisposalStep(
+        identityCancellation,
+        'Failed to cancel player identity subscription',
+      ),
+      _finishDisposalStep(
+        lifecycleCancellation,
+        'Failed to cancel player lifecycle subscription',
+      ),
+      if (service != null) _disposeService(service),
+    ]);
+  }
+
+  Future<void> _finishDisposalStep(
+    Future<void>? operation,
+    String failureMessage,
+  ) async {
+    try {
+      await operation;
+    } catch (error, stackTrace) {
+      debugPrint('$failureMessage: $error');
+      debugPrintStack(stackTrace: stackTrace);
     }
   }
 
