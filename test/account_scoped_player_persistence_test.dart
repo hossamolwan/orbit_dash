@@ -57,8 +57,8 @@ void main() {
     );
     await challengesA.claimReward(
       challengeA.definition.id,
-      onGrant: (amount) => walletA.creditDailyRewardOnce(
-        dateKey: challengesA.dateKey,
+      onGrant: (amount, date) => walletA.creditDailyRewardOnce(
+        dateKey: date,
         challengeId: challengeA.definition.id,
         amount: amount,
       ),

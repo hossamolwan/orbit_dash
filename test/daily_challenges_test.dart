@@ -94,6 +94,44 @@ void main() {
       );
     });
 
+    test('claim grant uses the effective date after rollover', () async {
+      var now = DateTime(2026, 10, 17, 23, 59);
+      final store = DailyChallengeStore(now: () => now);
+      await store.load();
+      final staleDate = store.dateKey;
+      now = DateTime(2026, 10, 18);
+      String? grantDate;
+      String? challengeDateAtGrant;
+      final expected = store.challenges.first;
+      final result = await store.claimReward(
+        expected.definition.id,
+        onGrant: (reward, date) async {
+          grantDate = date;
+          challengeDateAtGrant = store.dateKey;
+          return true;
+        },
+      );
+      expect(result, isNull); // The rotated challenge has not been completed.
+      expect(staleDate, '2026-10-17');
+      expect(grantDate, isNull);
+
+      final completed = store.challenges.first;
+      await store.recordEvent(
+        completed.definition.event,
+        amount: completed.definition.goal,
+      );
+      await store.claimReward(
+        completed.definition.id,
+        onGrant: (reward, date) async {
+          grantDate = date;
+          challengeDateAtGrant = store.dateKey;
+          return true;
+        },
+      );
+      expect(grantDate, '2026-10-18');
+      expect(challengeDateAtGrant, store.dateKey);
+    });
+
     test(
       'wallet reward grant and challenge claim are idempotent across restart',
       () async {
@@ -107,17 +145,14 @@ void main() {
           challenge.definition.event,
           amount: challenge.definition.goal,
         );
-        Future<bool> grant(int reward) async {
+        Future<bool> grant(int reward, String date) async {
           final credited = await wallet.creditDailyRewardOnce(
-            dateKey: challenges.dateKey,
+            dateKey: date,
             challengeId: challenge.definition.id,
             amount: reward,
           );
           return credited ||
-              wallet.hasDailyReward(
-                challenges.dateKey,
-                challenge.definition.id,
-              );
+              wallet.hasDailyReward(date, challenge.definition.id);
         }
 
         expect(
@@ -136,17 +171,14 @@ void main() {
         expect(
           await reloadedChallenges.claimReward(
             challenge.definition.id,
-            onGrant: (reward) async {
+            onGrant: (reward, date) async {
               final credited = await reloadedWallet.creditDailyRewardOnce(
-                dateKey: reloadedChallenges.dateKey,
+                dateKey: date,
                 challengeId: challenge.definition.id,
                 amount: reward,
               );
               return credited ||
-                  reloadedWallet.hasDailyReward(
-                    reloadedChallenges.dateKey,
-                    challenge.definition.id,
-                  );
+                  reloadedWallet.hasDailyReward(date, challenge.definition.id);
             },
           ),
           isNull,
@@ -188,8 +220,7 @@ void main() {
           challenge.definition.event,
           amount: challenge.definition.goal,
         );
-        final date = challengeStore.dateKey;
-        Future<bool> grant(GemWallet target, int reward) async {
+        Future<bool> grant(GemWallet target, int reward, String date) async {
           final credited = await target.creditDailyRewardOnce(
             dateKey: date,
             challengeId: challenge.definition.id,
@@ -202,11 +233,12 @@ void main() {
         await expectLater(
           challengeStore.claimReward(
             challenge.definition.id,
-            onGrant: (reward) => grant(wallet, reward),
+            onGrant: (reward, date) => grant(wallet, reward, date),
           ),
           throwsStateError,
         );
         expect(wallet.balance, challenge.definition.gemReward);
+        expect(challengeStore.bonusGemsGranted, 0);
 
         final restoredWallet = GemWallet();
         final restoredChallenges = DailyChallengeStore(now: now);
@@ -219,11 +251,26 @@ void main() {
         expect(
           await restoredChallenges.claimReward(
             challenge.definition.id,
-            onGrant: (reward) => grant(restoredWallet, reward),
+            onGrant: (reward, date) => grant(restoredWallet, reward, date),
           ),
           challenge.definition.gemReward,
         );
         expect(restoredWallet.balance, challenge.definition.gemReward);
+        expect(
+          restoredChallenges.bonusGemsGranted,
+          challenge.definition.gemReward,
+        );
+        expect(
+          await restoredChallenges.claimReward(
+            challenge.definition.id,
+            onGrant: (reward, date) => grant(restoredWallet, reward, date),
+          ),
+          isNull,
+        );
+        expect(
+          restoredChallenges.bonusGemsGranted,
+          challenge.definition.gemReward,
+        );
         expect(
           restoredChallenges.challenges
               .firstWhere(

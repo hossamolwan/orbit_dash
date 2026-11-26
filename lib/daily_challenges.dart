@@ -182,7 +182,7 @@ class DailyChallengeStore {
   /// Returns the gem grant for a successful first claim, or null otherwise.
   Future<int?> claimReward(
     String challengeId, {
-    Future<bool> Function(int reward)? onGrant,
+    Future<bool> Function(int reward, String dateKey)? onGrant,
   }) => _serialize(() async {
     final preferences = await _loadPreferences();
     await _ensureToday(preferences);
@@ -196,7 +196,7 @@ class DailyChallengeStore {
     final reward = challenge.definition.gemReward;
     // Grant first using an idempotent wallet transaction. If persisting the
     // claim then fails, a retry sees the same wallet transaction and is safe.
-    if (onGrant != null && !await onGrant(reward)) return null;
+    if (onGrant != null && !await onGrant(reward, _dateKey!)) return null;
     final updated = [..._challenges];
     updated[index] = DailyChallenge(
       definition: challenge.definition,

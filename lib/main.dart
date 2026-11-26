@@ -1760,10 +1760,9 @@ class _OrbitGamePageState extends State<OrbitGamePage>
 
   Future<void> _claimDailyChallengeReward(String id) async {
     try {
-      final date = _dailyChallengeStore.dateKey;
       await _dailyChallengeStore.claimReward(
         id,
-        onGrant: (reward) async {
+        onGrant: (reward, date) async {
           final credited = await _wallet.creditDailyRewardOnce(
             dateKey: date,
             challengeId: id,
