@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'account_scoped_preferences.dart';
+import 'daily_challenges.dart' show isValidDailyChallengeEntry;
+import 'local_data_validation.dart';
 import 'skins.dart' show ShipSkinId, OrbitSkinId, CoreSkinId, TrailSkinId;
 
 /// Availability of one locally persisted player-data domain.
@@ -350,7 +352,7 @@ LocalDataDomainResult _wallet(Map<String, Object?> values) {
     final purchases = decoded['purchases'];
     if (balance is! int ||
         balance < 0 ||
-        balance > (1 << 31) ||
+        balance > LocalDataValidation.maxPersistedCounter ||
         purchases is! Map<String, dynamic>) {
       return _result(
         LocalDataPresence.invalid,
@@ -379,10 +381,26 @@ LocalDataDomainResult _wallet(Map<String, Object?> values) {
           issue: 'invalidLegacyGrants',
         );
       }
+      final invalidDailyGrant = grants.cast<String>().any((grant) {
+        final match = RegExp(r'^daily:(\d{4}-\d{2}-\d{2}):(.+)$')
+            .firstMatch(grant);
+        return match != null &&
+            !LocalDataValidation.isValidCalendarDate(match[1]!);
+      });
+      if (invalidDailyGrant) {
+        return _result(
+          LocalDataPresence.invalid,
+          present: [key],
+          version: version,
+          issue: 'invalidLegacyGrants',
+        );
+      }
     } else {
       final date = decoded['dailyRewardDate'];
       final ids = decoded['dailyRewardIds'];
-      if ((date != null && (date is! String || !_validDate(date))) ||
+      if ((date != null &&
+              (date is! String ||
+                  !LocalDataValidation.isValidCalendarDate(date))) ||
           ids is! List ||
           ids.any((value) => value is! String || value.isEmpty) ||
           (date == null && ids.isNotEmpty)) {
@@ -415,17 +433,15 @@ LocalDataDomainResult _statistics(Map<String, Object?> values) => _keysResult(
   version: 1,
   valid: (key, value) {
     if (key == StatsKeys.completedStages) {
-      return value is List<String> &&
-          value.every((v) {
-            final stage = int.tryParse(v);
-            return stage != null && stage >= 1 && stage <= 5;
-          });
+      return LocalDataValidation.parseCompletedStages(value) != null;
     }
     if (key == 'orbit_dash_unlocked_stage') {
       return value is int && value >= 1 && value <= 6;
     }
-    if (value is! int || value < 0 || value > (1 << 31)) return false;
-    return key != StatsKeys.maxOrbit || (value >= 2 && value <= 5);
+    if (key == StatsKeys.maxOrbit) {
+      return LocalDataValidation.isValidMaxOrbit(value);
+    }
+    return LocalDataValidation.isValidCounter(value);
   },
 );
 
@@ -464,7 +480,9 @@ LocalDataDomainResult _daily(Map<String, Object?> values) {
     final date = data['date'] as String;
     final bonus = data['bonusGems'] as int? ?? 0;
     final challenges = data['challenges'] as Map<String, dynamic>;
-    if (!_validDate(date) || bonus < 0 || bonus > (1 << 31)) {
+    if (!LocalDataValidation.isValidCalendarDate(date) ||
+        bonus < 0 ||
+        bonus > LocalDataValidation.maxPersistedCounter) {
       return _result(
         LocalDataPresence.invalid,
         present: [key],
@@ -472,26 +490,7 @@ LocalDataDomainResult _daily(Map<String, Object?> values) {
       );
     }
     for (final entry in challenges.entries) {
-      final value = entry.value;
-      if (value is! Map<String, dynamic> ||
-          value['progress'] is! int ||
-          value['claimed'] is! bool) {
-        return _result(
-          LocalDataPresence.invalid,
-          present: [key],
-          issue: 'invalidChallenge',
-        );
-      }
-      final progress = value['progress'] as int;
-      final definition = _dailyChallengeShapes
-          .where((item) => item.id == entry.key)
-          .toList(growable: false);
-      final knownChallenge = definition.isEmpty ? null : definition.first;
-      if (progress < 0 ||
-          (knownChallenge != null && progress > knownChallenge.goal) ||
-          (value['claimed'] == true &&
-              knownChallenge != null &&
-              progress < knownChallenge.goal)) {
+      if (!isValidDailyChallengeEntry(entry.key, entry.value)) {
         return _result(
           LocalDataPresence.invalid,
           present: [key],
@@ -546,25 +545,3 @@ LocalDataDomainResult _bestScore(Map<String, Object?> values) => _keysResult(
   values,
   valid: (key, value) => value is int && value >= 0 && value <= (1 << 31),
 );
-
-bool _validDate(String value) {
-  if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(value)) return false;
-  final parsed = DateTime.tryParse(value);
-  return parsed != null &&
-      parsed.year.toString().padLeft(4, '0') == value.substring(0, 4) &&
-      parsed.month.toString().padLeft(2, '0') == value.substring(5, 7) &&
-      parsed.day.toString().padLeft(2, '0') == value.substring(8, 10);
-}
-
-const _dailyChallengeShapes = <_ChallengeShape>[
-  _ChallengeShape('collect_gems', 3),
-  _ChallengeShape('start_runs', 2),
-  _ChallengeShape('absorb_hazards', 1),
-  _ChallengeShape('reach_orbits', 1),
-];
-
-class _ChallengeShape {
-  const _ChallengeShape(this.id, this.goal);
-  final String id;
-  final int goal;
-}

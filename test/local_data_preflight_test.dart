@@ -5,8 +5,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:orbit_dash/account_scoped_preferences.dart';
 import 'package:orbit_dash/audio/game_audio_manager.dart';
+import 'package:orbit_dash/daily_challenges.dart';
 import 'package:orbit_dash/local_data_preflight.dart';
 import 'package:orbit_dash/local_data_quarantine.dart';
+import 'package:orbit_dash/local_data_validation.dart';
 import 'package:orbit_dash/main.dart';
 import 'package:orbit_dash/skins.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -81,6 +83,95 @@ void main() {
       LocalDataPresence.missing,
     );
     expect(after, before);
+  });
+
+  test('wallet and daily dates use strict calendar validation', () async {
+    expect(LocalDataValidation.isValidCalendarDate('2024-02-29'), isTrue);
+    expect(LocalDataValidation.isValidCalendarDate('2023-02-29'), isFalse);
+    expect(LocalDataValidation.isValidCalendarDate('2024-02-30'), isFalse);
+    expect(LocalDataValidation.isValidCalendarDate('2024-2-09'), isFalse);
+
+    SharedPreferences.setMockInitialValues({
+      AccountScopedPreferences.keyFor(playerA, GemKeys.state): jsonEncode({
+        'version': 2,
+        'balance': 3,
+        'dailyRewardDate': '2024-02-30',
+        'dailyRewardIds': ['collect_gems'],
+        'purchases': <String, int>{},
+      }),
+      AccountScopedPreferences.keyFor(playerA, DailyKeys.state): jsonEncode({
+        'date': '2024-02-30',
+        'bonusGems': 0,
+        'challenges': <String, Object?>{},
+      }),
+    });
+
+    final snapshot = await LocalDataPreflight(playerId: playerA).inspect();
+    expect(
+      snapshot.domains[LocalDataDomain.gemWallet]!.presence,
+      LocalDataPresence.invalid,
+    );
+    expect(
+      snapshot.domains[LocalDataDomain.dailyChallenges]!.presence,
+      LocalDataPresence.invalid,
+    );
+  });
+
+  test(
+    'preflight rejects impossible dates in legacy daily grant IDs',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        AccountScopedPreferences.keyFor(playerA, GemKeys.state): jsonEncode({
+          'version': 1,
+          'balance': 3,
+          'grants': ['daily:2024-02-30:collect_gems'],
+          'purchases': <String, int>{},
+        }),
+      });
+      final snapshot = await LocalDataPreflight(playerId: playerA).inspect();
+      expect(
+        snapshot.domains[LocalDataDomain.gemWallet]!.presence,
+        LocalDataPresence.invalid,
+      );
+    },
+  );
+
+  test('daily challenge entries share store acceptance rules', () async {
+    expect(
+      isValidDailyChallengeEntry('collect_gems', {
+        'progress': 3,
+        'claimed': true,
+      }),
+      isTrue,
+    );
+    expect(
+      isValidDailyChallengeEntry('collect_gems', {
+        'progress': 4,
+        'claimed': true,
+      }),
+      isFalse,
+    );
+    expect(
+      isValidDailyChallengeEntry('future_challenge', {
+        'progress': 1 << 40,
+        'claimed': false,
+      }),
+      isTrue,
+    );
+    expect(isValidDailyChallengeEntry('future_challenge', null), isFalse);
+
+    SharedPreferences.setMockInitialValues({
+      AccountScopedPreferences.keyFor(playerA, DailyKeys.state): jsonEncode({
+        'date': '2026-11-25',
+        'bonusGems': LocalDataValidation.maxPersistedCounter + 1,
+        'challenges': <String, Object?>{},
+      }),
+    });
+    final snapshot = await LocalDataPreflight(playerId: playerA).inspect();
+    expect(
+      snapshot.domains[LocalDataDomain.dailyChallenges]!.presence,
+      LocalDataPresence.invalid,
+    );
   });
 
   test(
@@ -453,7 +544,13 @@ void main() {
   testWidgets(
     'invalid wallet is quarantined and never reset, including retry',
     (tester) async {
-      const rawWallet = '{broken-wallet-record';
+      final rawWallet = jsonEncode({
+        'version': 2,
+        'balance': 27,
+        'dailyRewardDate': '2024-02-30',
+        'dailyRewardIds': ['collect_gems'],
+        'purchases': <String, int>{'ship.emerald': 5},
+      });
       SharedPreferences.setMockInitialValues({
         AccountScopedPreferences.localKey(GemKeys.state): rawWallet,
       });
@@ -549,7 +646,11 @@ void main() {
           'invalid-counter',
       AccountScopedPreferences.localKey(AchievementKeys.totalGems):
           'invalid-gems',
-      AccountScopedPreferences.localKey(DailyKeys.state): '{broken-daily-state',
+      AccountScopedPreferences.localKey(DailyKeys.state): jsonEncode({
+        'date': '2024-02-30',
+        'bonusGems': 0,
+        'challenges': <String, Object?>{},
+      }),
       AccountScopedPreferences.localKey(SkinKeys.selected): 'unknown-ship',
       AccountScopedPreferences.localKey(AppearanceKeys.orbit): 'unknown-orbit',
       AccountScopedPreferences.localKey(SurvivalKeys.best): 'invalid-score',

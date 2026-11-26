@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'account_scoped_preferences.dart';
+import 'local_data_validation.dart';
 
 class PlayerStatisticsStore {
   PlayerStatisticsStore({
@@ -46,18 +47,24 @@ class PlayerStatisticsStore {
   /// [highestUnlockedStage] remains optional for legacy callers only.
   Future<void> load({int? highestUnlockedStage}) => _serialize(() async {
     final preferences = await _loadPreferences();
-    _runsStarted = _readCounter(preferences, runsStartedKey);
-    _shieldAbsorptions = _readCounter(preferences, shieldAbsorptionsKey);
-    _losses = _readCounter(preferences, lossesKey);
-    _bestRun = _readCounter(preferences, bestRunKey);
-    _maxOrbit = _readCounter(preferences, maxOrbitKey).clamp(2, 5);
-    _completedStages
-      ..clear()
-      ..addAll(_readCompletedStages(preferences));
+    final runsStarted = _readCounter(preferences, runsStartedKey);
+    final shieldAbsorptions = _readCounter(preferences, shieldAbsorptionsKey);
+    final losses = _readCounter(preferences, lossesKey);
+    final bestRun = _readCounter(preferences, bestRunKey);
+    final maxOrbit = _readCounter(preferences, maxOrbitKey);
+    final completedStages = _readCompletedStages(preferences);
     // Unlocking stage N only follows completion of stages before N.
     for (var stage = 1; stage < (highestUnlockedStage ?? 1); stage++) {
-      if (stage <= 5) _completedStages.add(stage);
+      if (stage <= 5) completedStages.add(stage);
     }
+    _runsStarted = runsStarted;
+    _shieldAbsorptions = shieldAbsorptions;
+    _losses = losses;
+    _bestRun = bestRun;
+    _maxOrbit = maxOrbit;
+    _completedStages
+      ..clear()
+      ..addAll(completedStages);
     _loaded = true;
     await preferences.setStringList(
       _keys.key(completedStagesKey),
@@ -109,36 +116,44 @@ class PlayerStatisticsStore {
       });
 
   Future<void> _loadFrom(SharedPreferences preferences) async {
-    _runsStarted = _readCounter(preferences, runsStartedKey);
-    _shieldAbsorptions = _readCounter(preferences, shieldAbsorptionsKey);
-    _losses = _readCounter(preferences, lossesKey);
-    _bestRun = _readCounter(preferences, bestRunKey);
-    _maxOrbit = _readCounter(preferences, maxOrbitKey).clamp(2, 5);
+    final runsStarted = _readCounter(preferences, runsStartedKey);
+    final shieldAbsorptions = _readCounter(preferences, shieldAbsorptionsKey);
+    final losses = _readCounter(preferences, lossesKey);
+    final bestRun = _readCounter(preferences, bestRunKey);
+    final maxOrbit = _readCounter(preferences, maxOrbitKey);
+    final completedStages = _readCompletedStages(preferences);
+    _runsStarted = runsStarted;
+    _shieldAbsorptions = shieldAbsorptions;
+    _losses = losses;
+    _bestRun = bestRun;
+    _maxOrbit = maxOrbit;
     _completedStages
       ..clear()
-      ..addAll(_readCompletedStages(preferences));
+      ..addAll(completedStages);
     _loaded = true;
   }
 
   int _readCounter(SharedPreferences preferences, String key) {
-    try {
-      return (preferences.getInt(_keys.key(key)) ?? 0).clamp(0, 1 << 31);
-    } on TypeError {
-      return 0;
+    final value = preferences.get(_keys.key(key));
+    if (value == null) return key == maxOrbitKey ? 2 : 0;
+    if (key == maxOrbitKey) {
+      if (!LocalDataValidation.isValidMaxOrbit(value)) {
+        throw StateError('Stored max orbit is invalid.');
+      }
+    } else if (!LocalDataValidation.isValidCounter(value)) {
+      throw StateError('Stored statistics counter is invalid.');
     }
+    return value as int;
   }
 
   Set<int> _readCompletedStages(SharedPreferences preferences) {
-    try {
-      return (preferences.getStringList(_keys.key(completedStagesKey)) ??
-              const [])
-          .map(int.tryParse)
-          .whereType<int>()
-          .where((stage) => stage >= 1 && stage <= 5)
-          .toSet();
-    } on TypeError {
-      return {};
+    final value = preferences.get(_keys.key(completedStagesKey));
+    if (value == null) return {};
+    final stages = LocalDataValidation.parseCompletedStages(value);
+    if (stages == null) {
+      throw StateError('Stored completed stages are invalid.');
     }
+    return stages;
   }
 
   Future<T> _serialize<T>(Future<T> Function() action) async {

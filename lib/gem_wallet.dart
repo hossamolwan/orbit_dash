@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'account_scoped_preferences.dart';
+import 'local_data_validation.dart';
 
 /// Persistent local spendable currency and idempotency ledger.
 /// Future real-money grants must be verified by a trusted backend.
@@ -15,7 +16,7 @@ class GemWallet {
        _loadPreferences = loadPreferences ?? SharedPreferences.getInstance;
 
   static const stateKey = 'orbit_dash_gem_wallet_v1';
-  static const maxBalance = 1 << 31;
+  static const maxBalance = LocalDataValidation.maxPersistedCounter;
   static const maxRecentPickupIds = 256;
 
   final Future<SharedPreferences> Function() _loadPreferences;
@@ -207,10 +208,13 @@ class GemWallet {
           final match = RegExp(r'^daily:(\d{4}-\d{2}-\d{2}):(.+)$')
               .firstMatch(value);
           if (match != null &&
+              LocalDataValidation.isValidCalendarDate(match[1]!) &&
               (rewardDate == null || match[1]!.compareTo(rewardDate) > 0)) {
             rewardDate = match[1];
             rewardIds = {match[2]!};
-          } else if (match != null && match[1] == rewardDate) {
+          } else if (match != null &&
+              LocalDataValidation.isValidCalendarDate(match[1]!) &&
+              match[1] == rewardDate) {
             rewardIds.add(match[2]!);
           }
         }
@@ -268,7 +272,7 @@ class GemWallet {
   }
 
   static bool _validDate(String value) =>
-      RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(value);
+      LocalDataValidation.isValidCalendarDate(value);
 
   Future<T> _serialize<T>(Future<T> Function() action) async {
     final previous = _tail;

@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'account_scoped_preferences.dart';
+import 'local_data_validation.dart';
 
 enum DailyChallengeEvent {
   gemCollected,
@@ -71,6 +72,29 @@ const dailyChallengePool = <DailyChallengeDefinition>[
     gemReward: 8,
   ),
 ];
+
+/// Shared validation for each persisted challenge entry. Unknown challenge IDs
+/// retain the store's forward-compatible behavior, but malformed entries are
+/// rejected consistently by both preflight and the store parser.
+bool isValidDailyChallengeEntry(String id, Object? value) {
+  if (value is! Map<String, dynamic> ||
+      value['progress'] is! int ||
+      value['claimed'] is! bool) {
+    return false;
+  }
+  final progress = value['progress'] as int;
+  if (progress < 0) return false;
+  DailyChallengeDefinition? definition;
+  for (final challenge in dailyChallengePool) {
+    if (challenge.id == id) {
+      definition = challenge;
+      break;
+    }
+  }
+  if (definition == null) return true;
+  return progress <= definition.goal &&
+      (value['claimed'] != true || progress >= definition.goal);
+}
 
 /// Stores one day's challenge progress and a separate ledger of bonus gems.
 /// Bonus gems are deliberately separate from physical pickup totals.
@@ -261,10 +285,18 @@ class DailyChallengeStore {
         return null;
       }
       final date = decoded['date'] as String;
-      if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(date)) return null;
+      if (!LocalDataValidation.isValidCalendarDate(date)) return null;
       final bonusGems = decoded['bonusGems'] as int? ?? 0;
-      if (bonusGems < 0) return null;
+      if (bonusGems < 0 ||
+          bonusGems > LocalDataValidation.maxPersistedCounter) {
+        return null;
+      }
       final values = decoded['challenges'] as Map<String, dynamic>;
+      if (values.entries.any(
+        (entry) => !isValidDailyChallengeEntry(entry.key, entry.value),
+      )) {
+        return null;
+      }
       final selected = _freshChallenges(date);
       final result = <DailyChallenge>[];
       for (final challenge in selected) {
@@ -275,15 +307,9 @@ class DailyChallengeStore {
           result.add(challenge);
           continue;
         }
-        if (saved is! Map<String, dynamic> ||
-            saved['progress'] is! int ||
-            saved['claimed'] is! bool) {
-          return null;
-        }
-        final progress = saved['progress'] as int;
-        if (progress < 0 || progress > challenge.definition.goal) return null;
-        final claimed = saved['claimed'] as bool;
-        if (claimed && progress < challenge.definition.goal) return null;
+        final savedValues = saved as Map<String, dynamic>;
+        final progress = savedValues['progress'] as int;
+        final claimed = savedValues['claimed'] as bool;
         result.add(
           DailyChallenge(
             definition: challenge.definition,

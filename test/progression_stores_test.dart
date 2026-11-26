@@ -4,6 +4,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:orbit_dash/achievements.dart';
 import 'package:orbit_dash/player_statistics.dart';
 import 'package:orbit_dash/gem_wallet.dart';
+import 'package:orbit_dash/local_data_preflight.dart';
+import 'package:orbit_dash/local_data_validation.dart';
 import 'package:orbit_dash/skins.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:orbit_dash/account_scoped_preferences.dart';
@@ -72,6 +74,29 @@ void main() {
               .contains('pickup:'),
           isFalse,
         );
+      },
+    );
+
+    test(
+      'wallet maximum balance agrees with preflight and store decoding',
+      () async {
+        SharedPreferences.setMockInitialValues({
+          AccountScopedPreferences.localKey(GemWallet.stateKey): jsonEncode({
+            'version': 2,
+            'balance': GemWallet.maxBalance,
+            'dailyRewardDate': null,
+            'dailyRewardIds': <String>[],
+            'purchases': <String, int>{},
+          }),
+        });
+        final snapshot = await LocalDataPreflight(playerId: 'local').inspect();
+        expect(
+          snapshot.domains[LocalDataDomain.gemWallet]!.presence,
+          LocalDataPresence.present,
+        );
+        final wallet = GemWallet();
+        await wallet.load();
+        expect(wallet.balance, GemWallet.maxBalance);
       },
     );
 
@@ -680,7 +705,7 @@ void main() {
     });
 
     test(
-      'migrates only stages before the unlocked stage and is repeatable',
+      'adds completed stages before the unlocked stage and is repeatable',
       () async {
         SharedPreferences.setMockInitialValues({
           'orbit_dash_unlocked_stage': 4,
@@ -688,8 +713,6 @@ void main() {
             PlayerStatisticsStore.completedStagesKey,
           ): [
             '2',
-            'invalid',
-            '8',
           ],
         });
         final first = PlayerStatisticsStore();
@@ -704,7 +727,7 @@ void main() {
     );
 
     test(
-      'invalid counters do not prevent later progress from being saved',
+      'invalid counters and stages fail without normalizing stored data',
       () async {
         SharedPreferences.setMockInitialValues({
           AccountScopedPreferences.localKey(
@@ -712,13 +735,106 @@ void main() {
           ): 'invalid',
           AccountScopedPreferences.localKey(PlayerStatisticsStore.lossesKey):
               -10,
+          AccountScopedPreferences.localKey(
+            PlayerStatisticsStore.completedStagesKey,
+          ): [
+            '2',
+            'invalid',
+            '8',
+          ],
         });
+        final preferences = await SharedPreferences.getInstance();
+        final before = {
+          for (final key in preferences.getKeys()) key: preferences.get(key),
+        };
         final store = PlayerStatisticsStore();
-        await store.load(highestUnlockedStage: 1);
-        expect(store.runsStarted, 0);
-        expect(store.losses, 0);
-        await store.recordRunStarted();
-        expect(store.runsStarted, 1);
+        final snapshot = await LocalDataPreflight(playerId: 'local').inspect();
+        expect(
+          snapshot.domains[LocalDataDomain.statistics]!.presence,
+          LocalDataPresence.invalid,
+        );
+        await expectLater(
+          store.load(highestUnlockedStage: 1),
+          throwsStateError,
+        );
+        expect(store.isLoaded, isFalse);
+        expect({
+          for (final key in preferences.getKeys()) key: preferences.get(key),
+        }, before);
+      },
+    );
+
+    test(
+      'preflight and store agree on counter and max-orbit boundaries',
+      () async {
+        for (final maxOrbit in [2, 5]) {
+          SharedPreferences.setMockInitialValues({
+            AccountScopedPreferences.localKey(
+              PlayerStatisticsStore.maxOrbitKey,
+            ): maxOrbit,
+            AccountScopedPreferences.localKey(
+              PlayerStatisticsStore.runsStartedKey,
+            ): LocalDataValidation.maxPersistedCounter,
+          });
+          final snapshot = await LocalDataPreflight(playerId: 'local')
+              .inspect();
+          expect(
+            snapshot.domains[LocalDataDomain.statistics]!.presence,
+            LocalDataPresence.present,
+          );
+          final store = PlayerStatisticsStore();
+          await store.load();
+          expect(store.maxOrbit, maxOrbit);
+          expect(store.runsStarted, LocalDataValidation.maxPersistedCounter);
+        }
+
+        for (final maxOrbit in [1, 6]) {
+          SharedPreferences.setMockInitialValues({
+            AccountScopedPreferences.localKey(
+              PlayerStatisticsStore.maxOrbitKey,
+            ): maxOrbit,
+          });
+          final snapshot = await LocalDataPreflight(playerId: 'local')
+              .inspect();
+          expect(
+            snapshot.domains[LocalDataDomain.statistics]!.presence,
+            LocalDataPresence.invalid,
+          );
+          await expectLater(PlayerStatisticsStore().load(), throwsStateError);
+        }
+      },
+    );
+
+    test(
+      'preflight accepts valid stage spellings that the store canonicalizes',
+      () async {
+        SharedPreferences.setMockInitialValues({
+          AccountScopedPreferences.localKey(
+            PlayerStatisticsStore.completedStagesKey,
+          ): [
+            '01',
+            '2',
+            '2',
+          ],
+        });
+        final snapshot = await LocalDataPreflight(playerId: 'local').inspect();
+        expect(
+          snapshot.domains[LocalDataDomain.statistics]!.presence,
+          LocalDataPresence.present,
+        );
+
+        final store = PlayerStatisticsStore();
+        await store.load();
+        expect(store.completedStages, {1, 2});
+        final preferences = await SharedPreferences.getInstance();
+        expect(
+          preferences.getStringList(
+            AccountScopedPreferences.localKey(
+              PlayerStatisticsStore.completedStagesKey,
+            ),
+          ),
+          ['1', '2'],
+        );
       },
     );
   });
