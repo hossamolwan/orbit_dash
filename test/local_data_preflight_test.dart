@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:orbit_dash/account_scoped_preferences.dart';
 import 'package:orbit_dash/audio/game_audio_manager.dart';
 import 'package:orbit_dash/local_data_preflight.dart';
+import 'package:orbit_dash/local_data_quarantine.dart';
 import 'package:orbit_dash/main.dart';
 import 'package:orbit_dash/skins.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -315,6 +316,93 @@ void main() {
     },
   );
 
+  test(
+    'wallet quarantine preserves its exact value once per account',
+    () async {
+      const rawWallet = '{not-json-but-preserve-exactly';
+      SharedPreferences.setMockInitialValues({
+        AccountScopedPreferences.keyFor(playerA, GemKeys.state): rawWallet,
+      });
+      final preferences = await SharedPreferences.getInstance();
+
+      expect(
+        await LocalDataQuarantine.preserveInvalidWallet(
+          preferences: preferences,
+          playerId: playerA,
+        ),
+        isTrue,
+      );
+      expect(
+        await LocalDataQuarantine.preserveInvalidWallet(
+          preferences: preferences,
+          playerId: playerA,
+        ),
+        isFalse,
+      );
+
+      expect(
+        preferences.get(
+          AccountScopedPreferences.keyFor(
+            playerA,
+            LocalDataQuarantine.walletRawKey,
+          ),
+        ),
+        rawWallet,
+      );
+      expect(
+        preferences.get(
+          AccountScopedPreferences.keyFor(playerA, GemKeys.state),
+        ),
+        rawWallet,
+      );
+      expect(
+        preferences.containsKey(
+          AccountScopedPreferences.keyFor(
+            playerB,
+            LocalDataQuarantine.walletRawKey,
+          ),
+        ),
+        isFalse,
+      );
+    },
+  );
+
+  test(
+    'unusable pre-existing quarantine fails closed without changing data',
+    () async {
+      const rawWallet = '{original-invalid-wallet';
+      final quarantineValues = <Object>[
+        42,
+        '',
+        '{different-invalid-wallet',
+        <int>[1, 2],
+      ];
+      final sourceKey = AccountScopedPreferences.keyFor(playerA, GemKeys.state);
+      final quarantineKey = AccountScopedPreferences.keyFor(
+        playerA,
+        LocalDataQuarantine.walletRawKey,
+      );
+
+      for (final existingValue in quarantineValues) {
+        SharedPreferences.setMockInitialValues({
+          sourceKey: rawWallet,
+          quarantineKey: existingValue,
+        });
+        final preferences = await SharedPreferences.getInstance();
+
+        await expectLater(
+          LocalDataQuarantine.preserveInvalidWallet(
+            preferences: preferences,
+            playerId: playerA,
+          ),
+          throwsStateError,
+        );
+        expect(preferences.get(sourceKey), rawWallet);
+        expect(preferences.get(quarantineKey), existingValue);
+      }
+    },
+  );
+
   testWidgets('gameplay store loads wait until preflight completes', (
     tester,
   ) async {
@@ -361,6 +449,179 @@ void main() {
     tester.view.resetPhysicalSize();
     tester.view.resetDevicePixelRatio();
   });
+
+  testWidgets(
+    'invalid wallet is quarantined and never reset, including retry',
+    (tester) async {
+      const rawWallet = '{broken-wallet-record';
+      SharedPreferences.setMockInitialValues({
+        AccountScopedPreferences.localKey(GemKeys.state): rawWallet,
+      });
+      final preferences = await SharedPreferences.getInstance();
+      final driver = OrbitGameTestDriver();
+      tester.view.physicalSize = const Size(600, 900);
+      tester.view.devicePixelRatio = 1;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: OrbitGamePage(
+            audioController: _StubAudioController(),
+            testDriver: driver,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final walletKey = AccountScopedPreferences.localKey(GemKeys.state);
+      final quarantineKey = AccountScopedPreferences.localKey(
+        LocalDataQuarantine.walletRawKey,
+      );
+      expect(preferences.get(walletKey), rawWallet);
+      expect(preferences.get(quarantineKey), rawWallet);
+      expect(
+        preferences.containsKey(
+          AccountScopedPreferences.localKey(StatsKeys.completedStages),
+        ),
+        isFalse,
+      );
+      expect(driver.featureStoreLoadFailed, isTrue);
+
+      driver.retryFeatureStores();
+      await tester.pumpAndSettle();
+      expect(driver.featureStoreLoadFailed, isTrue);
+      expect(preferences.get(walletKey), rawWallet);
+      expect(preferences.get(quarantineKey), rawWallet);
+      await tester.pumpWidget(const SizedBox.shrink());
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    },
+  );
+
+  testWidgets('quarantine write failure blocks all store initialization', (
+    tester,
+  ) async {
+    const rawWallet = '{broken-wallet-record';
+    SharedPreferences.setMockInitialValues({
+      AccountScopedPreferences.localKey(GemKeys.state): rawWallet,
+    });
+    final preferences = await SharedPreferences.getInstance();
+    final driver = OrbitGameTestDriver(
+      quarantineWrite: (_, _, _) async => false,
+    );
+    tester.view.physicalSize = const Size(600, 900);
+    tester.view.devicePixelRatio = 1;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: OrbitGamePage(
+          audioController: _StubAudioController(),
+          testDriver: driver,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      preferences.get(AccountScopedPreferences.localKey(GemKeys.state)),
+      rawWallet,
+    );
+    expect(
+      preferences.containsKey(
+        AccountScopedPreferences.localKey(LocalDataQuarantine.walletRawKey),
+      ),
+      isFalse,
+    );
+    expect(
+      preferences.containsKey(
+        AccountScopedPreferences.localKey(StatsKeys.completedStages),
+      ),
+      isFalse,
+    );
+    expect(driver.featureStoreLoadFailed, isTrue);
+    await tester.pumpWidget(const SizedBox.shrink());
+    tester.view.resetPhysicalSize();
+    tester.view.resetDevicePixelRatio();
+  });
+
+  testWidgets('invalid non-wallet domains are not normalized by store loads', (
+    tester,
+  ) async {
+    final invalidValues = <String, Object>{
+      AccountScopedPreferences.localKey(StatsKeys.runsStarted):
+          'invalid-counter',
+      AccountScopedPreferences.localKey(AchievementKeys.totalGems):
+          'invalid-gems',
+      AccountScopedPreferences.localKey(DailyKeys.state): '{broken-daily-state',
+      AccountScopedPreferences.localKey(SkinKeys.selected): 'unknown-ship',
+      AccountScopedPreferences.localKey(AppearanceKeys.orbit): 'unknown-orbit',
+      AccountScopedPreferences.localKey(SurvivalKeys.best): 'invalid-score',
+    };
+    for (final entry in invalidValues.entries) {
+      SharedPreferences.setMockInitialValues({entry.key: entry.value});
+      final preferences = await SharedPreferences.getInstance();
+      final before = {
+        for (final key in preferences.getKeys()) key: preferences.get(key),
+      };
+      final driver = OrbitGameTestDriver();
+      tester.view.physicalSize = const Size(600, 900);
+      tester.view.devicePixelRatio = 1;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: OrbitGamePage(
+            audioController: _StubAudioController(),
+            testDriver: driver,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final after = {
+        for (final key in preferences.getKeys()) key: preferences.get(key),
+      };
+      expect(driver.featureStoreLoadFailed, isTrue);
+      expect(
+        after,
+        before,
+        reason: 'Invalid domain key ${entry.key} was changed.',
+      );
+      await tester.pumpWidget(const SizedBox.shrink());
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    }
+  });
+
+  testWidgets(
+    'incomplete and mismatched preflight block store initialization',
+    (tester) async {
+      for (final driver in [
+        OrbitGameTestDriver(
+          preflightPreferencesLoader: () =>
+              Future<SharedPreferences>.error(StateError('unavailable')),
+        ),
+        OrbitGameTestDriver(preflightPlayerIdOverride: playerB),
+      ]) {
+        SharedPreferences.setMockInitialValues({});
+        final preferences = await SharedPreferences.getInstance();
+        tester.view.physicalSize = const Size(600, 900);
+        tester.view.devicePixelRatio = 1;
+        await tester.pumpWidget(
+          MaterialApp(
+            home: OrbitGamePage(
+              audioController: _StubAudioController(),
+              testDriver: driver,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          preferences.getKeys().where(
+            (key) => key.startsWith('orbit_dash_player_v1_'),
+          ),
+          isEmpty,
+        );
+        await tester.pumpWidget(const SizedBox.shrink());
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      }
+    },
+  );
 }
 
 class _StubAudioController extends GameAudioController {

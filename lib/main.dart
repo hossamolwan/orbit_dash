@@ -10,6 +10,7 @@ import 'package:orbit_dash/firebase_player_identity.dart';
 import 'package:orbit_dash/gem_wallet.dart';
 import 'package:orbit_dash/gem_shop.dart';
 import 'package:orbit_dash/local_data_preflight.dart';
+import 'package:orbit_dash/local_data_quarantine.dart';
 import 'package:orbit_dash/player_identity.dart';
 import 'package:orbit_dash/player_statistics.dart';
 import 'package:orbit_dash/skins.dart';
@@ -584,10 +585,15 @@ class OrbitGameTestDriver {
   OrbitGameTestDriver({
     this.achievementPreferencesLoader,
     this.preflightPreferencesLoader,
+    this.preflightPlayerIdOverride,
+    this.quarantineWrite,
   });
 
   final Future<SharedPreferences> Function()? achievementPreferencesLoader;
   final Future<SharedPreferences> Function()? preflightPreferencesLoader;
+  final String? preflightPlayerIdOverride;
+  final Future<bool> Function(SharedPreferences, String, Object)?
+  quarantineWrite;
 
   late void Function() _placeShieldAtPlayer;
   late void Function() _placeHazardAtPlayer;
@@ -615,6 +621,8 @@ class OrbitGameTestDriver {
   late Future<void> Function() _flushProgress;
   late void Function(Future<void> Function()) _enqueueFeatureWrite;
   late LocalDataInventorySnapshot? Function() _readPreflightSnapshot;
+  late bool Function() _readFeatureStoreLoadFailed;
+  late void Function() _retryFeatureStores;
 
   bool get shieldActive => _readShieldActive();
   Duration get shieldRemaining => _readShieldRemaining();
@@ -637,6 +645,8 @@ class OrbitGameTestDriver {
   bool skinUnlocked(ShipSkinId id) => _readSkinUnlocked(id);
   Future<void> flushProgress() => _flushProgress();
   LocalDataInventorySnapshot? get preflightSnapshot => _readPreflightSnapshot();
+  bool get featureStoreLoadFailed => _readFeatureStoreLoadFailed();
+  void retryFeatureStores() => _retryFeatureStores();
   void queueFeatureWrite(Future<void> Function() write) =>
       _enqueueFeatureWrite(write);
 
@@ -672,6 +682,8 @@ class OrbitGameTestDriver {
     required Future<void> Function() flushProgress,
     required void Function(Future<void> Function()) enqueueFeatureWrite,
     required LocalDataInventorySnapshot? Function() readPreflightSnapshot,
+    required bool Function() readFeatureStoreLoadFailed,
+    required void Function() retryFeatureStores,
   }) {
     _placeShieldAtPlayer = placeShieldAtPlayer;
     _placeHazardAtPlayer = placeHazardAtPlayer;
@@ -699,6 +711,8 @@ class OrbitGameTestDriver {
     _flushProgress = flushProgress;
     _enqueueFeatureWrite = enqueueFeatureWrite;
     _readPreflightSnapshot = readPreflightSnapshot;
+    _readFeatureStoreLoadFailed = readFeatureStoreLoadFailed;
+    _retryFeatureStores = retryFeatureStores;
   }
 }
 
@@ -1052,34 +1066,51 @@ class _OrbitGamePageState extends State<OrbitGamePage>
       flushProgress: _flushProgress,
       enqueueFeatureWrite: _queueFeatureWrite,
       readPreflightSnapshot: () => _localDataInventory,
+      readFeatureStoreLoadFailed: () => _featureStoreLoadFailed,
+      retryFeatureStores: _retryFeatureStores,
     );
     _featureStoresReady = _preflightThenLoadFeatureStores();
     unawaited(_featureStoresReady);
-    SharedPreferences.getInstance().then((prefs) {
-      if (mounted) {
-        setState(
-          () => _best =
-              prefs.getInt(
-                AccountScopedPreferences.keyFor(_playerId, _survivalBestKey),
-              ) ??
-              0,
-        );
-      }
-    });
   }
 
   Future<void> _preflightThenLoadFeatureStores() async {
     try {
+      _featureStoresLoaded = false;
       final inventory = await LocalDataPreflight(
-        playerId: _playerId,
+        playerId: widget.testDriver?.preflightPlayerIdOverride ?? _playerId,
         loadPreferences: widget.testDriver?.preflightPreferencesLoader,
       ).inspect();
       if (!mounted) return;
       _localDataInventory = inventory;
-      if (!inventory.isComplete) {
-        throw StateError('Local data preflight did not complete.');
+      if (!inventory.isComplete || inventory.playerId != _playerId) {
+        throw StateError('Local data preflight was incomplete or mismatched.');
       }
       widget.onLocalDataInventoryReady?.call(inventory);
+      final invalidDomains = LocalDataDomain.values.where(
+        (domain) =>
+            inventory.domains[domain]?.presence == LocalDataPresence.invalid,
+      );
+      if (invalidDomains.isNotEmpty) {
+        if (invalidDomains.contains(LocalDataDomain.gemWallet)) {
+          final preferences =
+              await (widget.testDriver?.preflightPreferencesLoader?.call() ??
+                  SharedPreferences.getInstance());
+          await LocalDataQuarantine.preserveInvalidWallet(
+            preferences: preferences,
+            playerId: _playerId,
+            writeValue: widget.testDriver?.quarantineWrite,
+          );
+        }
+        throw StateError(
+          'Invalid local player data requires protection before loading.',
+        );
+      }
+      final preferences = await SharedPreferences.getInstance();
+      final bestScore = preferences.getInt(
+        AccountScopedPreferences.keyFor(_playerId, _survivalBestKey),
+      );
+      if (!mounted) return;
+      setState(() => _best = bestScore ?? 0);
       await _loadFeatureStores();
     } catch (error) {
       debugPrint('Failed to inspect local player data: $error');
@@ -1153,6 +1184,18 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   }
 
   Future<void> _loadAchievements() async {
+    final inventory = _localDataInventory;
+    if (inventory == null ||
+        !inventory.isComplete ||
+        inventory.playerId != _playerId ||
+        inventory.domains.values.any(
+          (result) => result.presence == LocalDataPresence.invalid,
+        )) {
+      _achievementsLoadFailed = true;
+      _featureStoreLoadFailed = true;
+      if (mounted) setState(() {});
+      return;
+    }
     if (_achievementsLoading || _achievementsLoaded) return;
     _achievementsLoading = true;
     try {
@@ -1389,6 +1432,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
   }
 
   void _start() {
+    if (!_featureStoresLoaded || _featureStoreLoadFailed) return;
     if (_state == RunState.playing) return;
     setState(() {
       _clearOrbitUnlockNotification();
