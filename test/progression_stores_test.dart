@@ -713,6 +713,123 @@ void main() {
       expect(store.distinctStagesCompleted, 1);
     });
 
+    test('failed counter writes preserve memory and can be retried', () async {
+      final preferences = await SharedPreferences.getInstance();
+      var fail = true;
+      final store = PlayerStatisticsStore(
+        writeInt: (prefs, key, value) async {
+          if (fail) return false;
+          return prefs.setInt(key, value);
+        },
+      );
+      await store.load();
+      await expectLater(store.recordRunStarted(), throwsStateError);
+      expect(store.runsStarted, 0);
+      fail = false;
+      await store.recordRunStarted();
+      expect(store.runsStarted, 1);
+      expect(
+        preferences.getInt(
+          AccountScopedPreferences.localKey(
+            PlayerStatisticsStore.runsStartedKey,
+          ),
+        ),
+        1,
+      );
+    });
+
+    test('counter write exceptions preserve memory and allow retry', () async {
+      var fail = true;
+      final store = PlayerStatisticsStore(
+        writeInt: (prefs, key, value) async {
+          if (fail) throw StateError('simulated statistics write failure');
+          return prefs.setInt(key, value);
+        },
+      );
+      await store.load();
+      await expectLater(store.recordLoss(), throwsStateError);
+      expect(store.losses, 0);
+      fail = false;
+      await store.recordLoss();
+      expect(store.losses, 1);
+    });
+
+    test('failed stage write leaves stage retryable and unique', () async {
+      var fail = true;
+      final store = PlayerStatisticsStore(
+        writeStringList: (prefs, key, values) async {
+          if (fail && values!.contains('3')) return false;
+          return prefs.setStringList(key, values!);
+        },
+      );
+      await store.load();
+      await expectLater(store.recordStageCompleted(3), throwsStateError);
+      expect(store.completedStages, isEmpty);
+      fail = false;
+      await store.recordStageCompleted(3);
+      await store.recordStageCompleted(3);
+      expect(store.completedStages, {3});
+      expect(store.distinctStagesCompleted, 1);
+    });
+
+    test(
+      'failed stage persistence during load leaves state uncommitted',
+      () async {
+        var fail = true;
+        final store = PlayerStatisticsStore(
+          writeStringList: (prefs, key, values) async {
+            if (fail) return false;
+            return prefs.setStringList(key, values!);
+          },
+        );
+        await expectLater(
+          store.load(highestUnlockedStage: 4),
+          throwsStateError,
+        );
+        expect(store.isLoaded, isFalse);
+        expect(store.completedStages, isEmpty);
+        expect(store.runsStarted, 0);
+
+        fail = false;
+        await store.load(highestUnlockedStage: 4);
+        expect(store.isLoaded, isTrue);
+        expect(store.completedStages, {1, 2, 3});
+      },
+    );
+
+    test(
+      'survival partial write does not commit memory and retry recovers',
+      () async {
+        final preferences = await SharedPreferences.getInstance();
+        var failOrbit = true;
+        final store = PlayerStatisticsStore(
+          writeInt: (prefs, key, value) async {
+            if (key.endsWith(PlayerStatisticsStore.maxOrbitKey) && failOrbit) {
+              return false;
+            }
+            return prefs.setInt(key, value);
+          },
+        );
+        await store.load();
+        await expectLater(store.recordSurvivalRun(120, 4), throwsStateError);
+        expect(store.bestRun, 0);
+        expect(store.maxOrbit, 2);
+        expect(
+          preferences.getInt(
+            AccountScopedPreferences.localKey(PlayerStatisticsStore.bestRunKey),
+          ),
+          120,
+        );
+        failOrbit = false;
+        await store.recordSurvivalRun(120, 4);
+        expect(store.bestRun, 120);
+        expect(store.maxOrbit, 4);
+        await store.recordSurvivalRun(80, 3);
+        expect(store.bestRun, 120);
+        expect(store.maxOrbit, 4);
+      },
+    );
+
     test(
       'adds completed stages before the unlocked stage and is repeatable',
       () async {

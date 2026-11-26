@@ -9,8 +9,16 @@ class PlayerStatisticsStore {
   PlayerStatisticsStore({
     String playerId = AccountScopedPreferences.localPlayerId,
     Future<SharedPreferences> Function()? loadPreferences,
+    Future<bool> Function(SharedPreferences, String, int)? writeInt,
+    Future<bool> Function(SharedPreferences, String, List<String>?)?
+    writeStringList,
   }) : _keys = AccountScopedPreferences(playerId),
-       _loadPreferences = loadPreferences ?? SharedPreferences.getInstance;
+       _loadPreferences = loadPreferences ?? SharedPreferences.getInstance,
+       // Public injection names map to private backing fields.
+       // ignore: prefer_initializing_formals
+       _writeInt = writeInt,
+       // ignore: prefer_initializing_formals
+       _writeStringList = writeStringList;
 
   static const runsStartedKey = 'orbit_dash_stats_runs_started_v1';
 
@@ -23,6 +31,9 @@ class PlayerStatisticsStore {
 
   final Future<SharedPreferences> Function() _loadPreferences;
   final AccountScopedPreferences _keys;
+  final Future<bool> Function(SharedPreferences, String, int)? _writeInt;
+  final Future<bool> Function(SharedPreferences, String, List<String>?)?
+  _writeStringList;
   final Set<int> _completedStages = {};
   int _runsStarted = 0;
   int _shieldAbsorptions = 0;
@@ -57,6 +68,7 @@ class PlayerStatisticsStore {
     for (var stage = 1; stage < (highestUnlockedStage ?? 1); stage++) {
       if (stage <= 5) completedStages.add(stage);
     }
+    await _saveCompletedStages(preferences, completedStages);
     _runsStarted = runsStarted;
     _shieldAbsorptions = shieldAbsorptions;
     _losses = losses;
@@ -66,28 +78,37 @@ class PlayerStatisticsStore {
       ..clear()
       ..addAll(completedStages);
     _loaded = true;
-    await preferences.setStringList(
-      _keys.key(completedStagesKey),
-      _completedStages.map((stage) => '$stage').toList()..sort(),
-    );
   });
 
-  Future<void> recordRunStarted() =>
-      _increment(runsStartedKey, () => _runsStarted++);
+  Future<void> recordRunStarted() => _increment(runsStartedKey);
 
-  Future<void> recordShieldAbsorption() =>
-      _increment(shieldAbsorptionsKey, () => _shieldAbsorptions++);
+  Future<void> recordShieldAbsorption() => _increment(shieldAbsorptionsKey);
 
-  Future<void> recordLoss() => _increment(lossesKey, () => _losses++);
+  Future<void> recordLoss() => _increment(lossesKey);
 
   Future<void> recordSurvivalRun(int score, int maxOrbit) =>
       _serialize(() async {
         final preferences = await _loadPreferences();
         if (!_loaded) await _loadFrom(preferences);
-        if (score > _bestRun) _bestRun = score;
-        if (maxOrbit > _maxOrbit) _maxOrbit = maxOrbit.clamp(2, 5);
-        await preferences.setInt(_keys.key(bestRunKey), _bestRun);
-        await preferences.setInt(_keys.key(maxOrbitKey), _maxOrbit);
+        final candidateBest = score > _bestRun ? score : _bestRun;
+        final candidateOrbit = maxOrbit > _maxOrbit
+            ? maxOrbit.clamp(2, 5)
+            : _maxOrbit;
+        // SharedPreferences has no transaction spanning these two keys. Keep
+        // memory unchanged unless both writes succeed; retries remain monotonic
+        // by incorporating any already-persisted higher value.
+        final persistedBest = _readCounter(preferences, bestRunKey);
+        final persistedOrbit = _readCounter(preferences, maxOrbitKey);
+        final best = persistedBest > candidateBest
+            ? persistedBest
+            : candidateBest;
+        final orbit = persistedOrbit > candidateOrbit
+            ? persistedOrbit
+            : candidateOrbit;
+        await _setInt(preferences, bestRunKey, best);
+        await _setInt(preferences, maxOrbitKey, orbit);
+        _bestRun = best;
+        _maxOrbit = orbit;
       });
 
   /// Writes legacy campaign history without affecting Survival progression.
@@ -95,25 +116,61 @@ class PlayerStatisticsStore {
     if (stage < 1 || stage > 5) return;
     final preferences = await _loadPreferences();
     if (!_loaded) await _loadFrom(preferences);
-    if (_completedStages.add(stage)) {
-      await preferences.setStringList(
-        _keys.key(completedStagesKey),
-        _completedStages.map((stage) => '$stage').toList()..sort(),
-      );
+    if (_completedStages.contains(stage)) return;
+    final candidate = {..._completedStages, stage};
+    await _saveCompletedStages(preferences, candidate);
+    _completedStages
+      ..clear()
+      ..addAll(candidate);
+  });
+
+  Future<void> _increment(String key) => _serialize(() async {
+    final preferences = await _loadPreferences();
+    if (!_loaded) await _loadFrom(preferences);
+    final value = switch (key) {
+      runsStartedKey => _runsStarted,
+      shieldAbsorptionsKey => _shieldAbsorptions,
+      _ => _losses,
+    };
+    final next = value + 1;
+    await _setInt(preferences, key, next);
+    switch (key) {
+      case runsStartedKey:
+        _runsStarted = next;
+      case shieldAbsorptionsKey:
+        _shieldAbsorptions = next;
+      default:
+        _losses = next;
     }
   });
 
-  Future<void> _increment(String key, void Function() increment) =>
-      _serialize(() async {
-        final preferences = await _loadPreferences();
-        if (!_loaded) await _loadFrom(preferences);
-        increment();
-        await preferences.setInt(_keys.key(key), switch (key) {
-          runsStartedKey => _runsStarted,
-          shieldAbsorptionsKey => _shieldAbsorptions,
-          _ => _losses,
-        });
-      });
+  Future<void> _setInt(
+    SharedPreferences preferences,
+    String key,
+    int value,
+  ) async {
+    final saved =
+        await (_writeInt?.call(preferences, _keys.key(key), value) ??
+            preferences.setInt(_keys.key(key), value));
+    if (!saved) throw StateError('Statistics save was not confirmed.');
+  }
+
+  Future<void> _saveCompletedStages(
+    SharedPreferences preferences,
+    Set<int> stages,
+  ) async {
+    final saved =
+        await (_writeStringList?.call(
+              preferences,
+              _keys.key(completedStagesKey),
+              stages.map((stage) => '$stage').toList()..sort(),
+            ) ??
+            preferences.setStringList(
+              _keys.key(completedStagesKey),
+              stages.map((stage) => '$stage').toList()..sort(),
+            ));
+    if (!saved) throw StateError('Statistics save was not confirmed.');
+  }
 
   Future<void> _loadFrom(SharedPreferences preferences) async {
     final runsStarted = _readCounter(preferences, runsStartedKey);

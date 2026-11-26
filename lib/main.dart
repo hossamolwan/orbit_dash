@@ -1634,6 +1634,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
       if (mounted) setState(() {});
     } catch (error) {
       debugPrint('Failed to save started-run statistic: $error');
+      rethrow;
     }
   }
 
@@ -1643,6 +1644,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
       if (mounted) setState(() {});
     } catch (error) {
       debugPrint('Failed to save shield statistic: $error');
+      rethrow;
     }
   }
 
@@ -1652,6 +1654,7 @@ class _OrbitGamePageState extends State<OrbitGamePage>
       if (mounted) setState(() {});
     } catch (error) {
       debugPrint('Failed to save loss statistic: $error');
+      rethrow;
     }
   }
 
