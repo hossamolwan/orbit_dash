@@ -695,6 +695,8 @@ class OrbitGameTestDriver {
   final String? preflightPlayerIdOverride;
   final Future<bool> Function(SharedPreferences, String, Object)?
   quarantineWrite;
+  int _lifecycleFlushCount = 0;
+  int get lifecycleFlushCount => _lifecycleFlushCount;
 
   late void Function() _placeShieldAtPlayer;
   late void Function() _placeHazardAtPlayer;
@@ -1070,6 +1072,8 @@ class _OrbitGamePageState extends State<OrbitGamePage>
       : _appearanceStore.selectedTrail;
   int _pickupSequence = 0;
   int _runToken = 0;
+  bool _appIsActive = true;
+  Future<void> _backgroundProgressFlushes = Future<void>.value();
   bool _purchaseInProgress = false;
   bool _debugCosmeticTestingRequested = false;
   ShipSkinId? _debugShipSkin;
@@ -1371,10 +1375,26 @@ class _OrbitGamePageState extends State<OrbitGamePage>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    _audio.setAppActive(state == AppLifecycleState.resumed);
-    if (state != AppLifecycleState.resumed && _state == RunState.playing) {
-      _pause(playEffect: false);
+    final isResumed = state == AppLifecycleState.resumed;
+    _audio.setAppActive(isResumed);
+    if (isResumed) {
+      _appIsActive = true;
+      return;
     }
+    if (!_appIsActive) return;
+    _appIsActive = false;
+    if (_state == RunState.playing) _pause(playEffect: false);
+    if (widget.testDriver != null) {
+      widget.testDriver!._lifecycleFlushCount++;
+    }
+    _backgroundProgressFlushes = _backgroundProgressFlushes.then((_) async {
+      try {
+        await _flushProgress();
+      } catch (error, stackTrace) {
+        debugPrint('Failed to flush gameplay progress in background: $error');
+        debugPrintStack(stackTrace: stackTrace);
+      }
+    });
   }
 
   void _audioSettingsChanged() {
@@ -1590,14 +1610,17 @@ class _OrbitGamePageState extends State<OrbitGamePage>
     if (_score <= _best) return;
     _best = _score;
     _newRecord = true;
-    unawaited(
-      SharedPreferences.getInstance().then(
-        (prefs) => prefs.setInt(
-          AccountScopedPreferences.keyFor(_playerId, _survivalBestKey),
-          _best,
-        ),
-      ),
-    );
+    final bestScore = _score;
+    _queueFeatureWrite(() async {
+      final preferences = await SharedPreferences.getInstance();
+      final persisted = await preferences.setInt(
+        AccountScopedPreferences.keyFor(_playerId, _survivalBestKey),
+        bestScore,
+      );
+      if (!persisted) {
+        throw StateError('Survival best score was not persisted.');
+      }
+    });
   }
 
   Future<List<AchievementId>> _recordGemProgress() async {

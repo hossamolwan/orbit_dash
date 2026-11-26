@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -586,6 +587,83 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );
+  testWidgets('queued survival best score is awaited by progress flush', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      'orbit_dash_best': 21,
+      AccountScopedPreferences.localKey('orbit_dash_survival_best'): 0,
+    });
+    final driver = OrbitGameTestDriver();
+    await tester.pumpWidget(_testApp(testDriver: driver));
+    await tester.pumpAndSettle();
+    await driver.flushProgress();
+
+    final queuedWriteGate = Completer<void>();
+    driver.queueFeatureWrite(() => queuedWriteGate.future);
+    await tester.tap(find.text('START RUN'));
+    await tester.pump();
+    driver.placeGemAtPlayer();
+    await tester.pump(const Duration(milliseconds: 16));
+    driver.placeHazardAtPlayer();
+    await tester.pump(const Duration(milliseconds: 16));
+
+    final preferences = await SharedPreferences.getInstance();
+    var flushCompleted = false;
+    final flush = driver.flushProgress().then((_) => flushCompleted = true);
+    await tester.pump();
+    expect(flushCompleted, isFalse);
+    expect(
+      preferences.getInt(
+        AccountScopedPreferences.localKey('orbit_dash_survival_best'),
+      ),
+      0,
+    );
+
+    queuedWriteGate.complete();
+    await flush;
+    expect(flushCompleted, isTrue);
+    expect(preferences.getInt('orbit_dash_best'), 21);
+    expect(
+      preferences.getInt(
+        AccountScopedPreferences.localKey('orbit_dash_survival_best'),
+      ),
+      1,
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('background transition pauses and flushes pending writes', (
+    tester,
+  ) async {
+    final driver = OrbitGameTestDriver();
+    await tester.pumpWidget(_testApp(testDriver: driver));
+    await tester.pumpAndSettle();
+    await driver.flushProgress();
+    final queuedWriteGate = Completer<void>();
+    driver.queueFeatureWrite(() => queuedWriteGate.future);
+
+    await tester.tap(find.text('START RUN'));
+    await tester.pump();
+    expect(driver.runState, RunState.playing);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump();
+    expect(driver.runState, RunState.paused);
+    expect(driver.lifecycleFlushCount, 1);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+    expect(driver.lifecycleFlushCount, 1);
+
+    queuedWriteGate.complete();
+    await driver.flushProgress();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump();
+    expect(driver.lifecycleFlushCount, 2);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
   testWidgets('shows the start screen and starts a run', (tester) async {
     await tester.pumpWidget(_testApp());
     await tester.pumpAndSettle();
