@@ -904,11 +904,13 @@ class AppearanceStore {
   OrbitSkinId _selectedOrbit = OrbitSkinId.defaultOrbit;
   CoreSkinId _selectedCore = CoreSkinId.defaultCore;
   TrailSkinId _selectedTrail = TrailSkinId.classic;
+  bool _loaded = false;
   Future<void> _tail = Future<void>.value();
 
   OrbitSkinId get selectedOrbit => _selectedOrbit;
   CoreSkinId get selectedCore => _selectedCore;
   TrailSkinId get selectedTrail => _selectedTrail;
+  bool get isLoaded => _loaded;
   Future<void> flush() => _tail;
 
   Future<void> load({Set<String> ownedItemIds = const {}}) =>
@@ -953,6 +955,7 @@ class AppearanceStore {
         if (_selectedTrail.name != trailValue) {
           await _save(prefs, _keys.key(selectedTrailKey), _selectedTrail.name);
         }
+        _loaded = true;
       });
 
   Future<bool> selectOrbit(
@@ -1032,8 +1035,10 @@ class SkinStore {
   final Future<SharedPreferences> Function() _loadPreferences;
   final AccountScopedPreferences _keys;
   ShipSkinId _selected = ShipSkinId.defaultSkin;
+  bool _loaded = false;
   Future<void> _tail = Future<void>.value();
   ShipSkinId get selectedSkin => _selected;
+  bool get isLoaded => _loaded;
   Future<void> flush() => _tail;
 
   Future<void> load({Set<String> ownedItemIds = const {'ship.defaultSkin'}}) =>
@@ -1059,6 +1064,7 @@ class SkinStore {
           );
           if (!saved) throw StateError('Skin selection was not persisted.');
         }
+        _loaded = true;
       });
 
   Future<bool> select(ShipSkinId id, {required Set<String> ownedItemIds}) =>
