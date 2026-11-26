@@ -12,19 +12,22 @@ class GemWallet {
   GemWallet({
     String playerId = AccountScopedPreferences.localPlayerId,
     Future<SharedPreferences> Function()? loadPreferences,
+    this.writeString,
   }) : _keys = AccountScopedPreferences(playerId),
        _loadPreferences = loadPreferences ?? SharedPreferences.getInstance;
 
   static const stateKey = 'orbit_dash_gem_wallet_v1';
   static const maxBalance = LocalDataValidation.maxPersistedCounter;
   static const maxRecentPickupIds = 256;
+  static const maxDailyRewardDates = 30;
+  static const maxDailyRewardIdsPerDate = 128;
 
   final Future<SharedPreferences> Function() _loadPreferences;
+  final Future<bool> Function(SharedPreferences, String, String)? writeString;
   final AccountScopedPreferences _keys;
   int _balance = 0;
   final Set<String> _recentPickupIds = {};
-  final Set<String> _dailyRewardIds = {};
-  String? _dailyRewardDate;
+  final Map<String, Set<String>> _dailyRewardLedger = {};
   final Map<String, int> _purchases = {};
   bool _loaded = false;
   Future<void> _tail = Future<void>.value();
@@ -34,7 +37,7 @@ class GemWallet {
   Set<String> get purchasedItemIds => Set.unmodifiable(_purchases.keys);
   bool owns(String itemId) => _purchases.containsKey(itemId);
   bool hasDailyReward(String dateKey, String challengeId) =>
-      _dailyRewardDate == dateKey && _dailyRewardIds.contains(challengeId);
+      _dailyRewardLedger[dateKey]?.contains(challengeId) ?? false;
   Future<void> flush() => _tail;
 
   /// Starts a new short-lived pickup deduplication window.
@@ -47,27 +50,19 @@ class GemWallet {
     _recentPickupIds.clear();
     if (state == null) {
       _balance = 0;
-      _dailyRewardIds.clear();
-      _dailyRewardDate = null;
+      _dailyRewardLedger.clear();
       _purchases.clear();
-      await _write(prefs, 0, null, {}, {});
+      await _write(prefs, 0, {}, {});
     } else {
       _balance = state.balance;
-      _dailyRewardDate = state.dailyRewardDate;
-      _dailyRewardIds
+      _dailyRewardLedger
         ..clear()
-        ..addAll(state.dailyRewardIds);
+        ..addAll(_copyLedger(state.dailyRewardLedger));
       _purchases
         ..clear()
         ..addAll(state.purchases);
-      if (state.version == 1) {
-        await _write(
-          prefs,
-          _balance,
-          _dailyRewardDate,
-          _dailyRewardIds,
-          _purchases,
-        );
+      if (state.version != 3) {
+        await _write(prefs, _balance, _dailyRewardLedger, _purchases);
       }
     }
     _loaded = true;
@@ -84,13 +79,7 @@ class GemWallet {
         if (_recentPickupIds.contains(pickupId)) return false;
         final nextBalance = _balance + amount;
         if (nextBalance > maxBalance) return false;
-        await _write(
-          prefs,
-          nextBalance,
-          _dailyRewardDate,
-          _dailyRewardIds,
-          _purchases,
-        );
+        await _write(prefs, nextBalance, _dailyRewardLedger, _purchases);
         _balance = nextBalance;
         _recentPickupIds.add(pickupId);
         if (_recentPickupIds.length > maxRecentPickupIds) {
@@ -99,7 +88,7 @@ class GemWallet {
         return true;
       });
 
-  /// Persists daily reward idempotency for the current reward date only.
+  /// Persists daily reward idempotency across a bounded window of dates.
   Future<bool> creditDailyRewardOnce({
     required String dateKey,
     required String challengeId,
@@ -113,20 +102,23 @@ class GemWallet {
     }
     final prefs = await _loadPreferences();
     await _ensureLoaded(prefs);
-    if (_dailyRewardDate != dateKey) {
-      _dailyRewardDate = dateKey;
-      _dailyRewardIds.clear();
+    if (hasDailyReward(dateKey, challengeId)) return false;
+    if ((_dailyRewardLedger[dateKey]?.length ?? 0) >=
+        maxDailyRewardIdsPerDate) {
+      return false;
     }
-    if (_dailyRewardIds.contains(challengeId)) return false;
     final nextBalance = _balance + amount;
     if (nextBalance > maxBalance) return false;
-    final nextRewards = {..._dailyRewardIds, challengeId};
-    await _write(prefs, nextBalance, dateKey, nextRewards, _purchases);
+    final nextLedger = _copyLedger(_dailyRewardLedger)..remove(dateKey);
+    nextLedger[dateKey] = {...?_dailyRewardLedger[dateKey], challengeId};
+    while (nextLedger.length > maxDailyRewardDates) {
+      nextLedger.remove(nextLedger.keys.first);
+    }
+    await _write(prefs, nextBalance, nextLedger, _purchases);
     _balance = nextBalance;
-    _dailyRewardDate = dateKey;
-    _dailyRewardIds
+    _dailyRewardLedger
       ..clear()
-      ..addAll(nextRewards);
+      ..addAll(nextLedger);
     return true;
   });
 
@@ -141,13 +133,7 @@ class GemWallet {
         if (_purchases.containsKey(itemId) || _balance < price) return false;
         final nextBalance = _balance - price;
         final nextPurchases = {..._purchases, itemId: price};
-        await _write(
-          prefs,
-          nextBalance,
-          _dailyRewardDate,
-          _dailyRewardIds,
-          nextPurchases,
-        );
+        await _write(prefs, nextBalance, _dailyRewardLedger, nextPurchases);
         _balance = nextBalance;
         _purchases
           ..clear()
@@ -158,17 +144,15 @@ class GemWallet {
   Future<void> _ensureLoaded(SharedPreferences prefs) async {
     final state = _decode(_readRaw(prefs));
     if (state == null) {
-      await _write(prefs, 0, null, {}, {});
+      await _write(prefs, 0, {}, {});
       _balance = 0;
-      _dailyRewardDate = null;
-      _dailyRewardIds.clear();
+      _dailyRewardLedger.clear();
       _purchases.clear();
     } else {
       _balance = state.balance;
-      _dailyRewardDate = state.dailyRewardDate;
-      _dailyRewardIds
+      _dailyRewardLedger
         ..clear()
-        ..addAll(state.dailyRewardIds);
+        ..addAll(_copyLedger(state.dailyRewardLedger));
       _purchases
         ..clear()
         ..addAll(state.purchases);
@@ -189,7 +173,9 @@ class GemWallet {
     try {
       final data = jsonDecode(raw);
       if (data is! Map<String, dynamic> ||
-          (data['version'] != 1 && data['version'] != 2) ||
+          (data['version'] != 1 &&
+              data['version'] != 2 &&
+              data['version'] != 3) ||
           data['balance'] is! int ||
           data['purchases'] is! Map<String, dynamic>) {
         return null;
@@ -197,8 +183,7 @@ class GemWallet {
       final balance = data['balance'] as int;
       final version = data['version'] as int;
       final purchaseValues = data['purchases'] as Map<String, dynamic>;
-      String? rewardDate;
-      Set<String> rewardIds = {};
+      final rewardLedger = <String, Set<String>>{};
       if (version == 1) {
         final oldGrants = data['grants'];
         if (oldGrants is! List || oldGrants.any((value) => value is! String)) {
@@ -208,27 +193,65 @@ class GemWallet {
           final match = RegExp(r'^daily:(\d{4}-\d{2}-\d{2}):(.+)$')
               .firstMatch(value);
           if (match != null &&
-              LocalDataValidation.isValidCalendarDate(match[1]!) &&
-              (rewardDate == null || match[1]!.compareTo(rewardDate) > 0)) {
-            rewardDate = match[1];
-            rewardIds = {match[2]!};
-          } else if (match != null &&
-              LocalDataValidation.isValidCalendarDate(match[1]!) &&
-              match[1] == rewardDate) {
-            rewardIds.add(match[2]!);
+              !LocalDataValidation.isValidCalendarDate(match[1]!)) {
+            return null;
+          }
+          if (match != null && !rewardLedger.containsKey(match[1])) {
+            rewardLedger[match[1]!] = {match[2]!};
+          } else if (match != null) {
+            rewardLedger
+                .putIfAbsent(match[1]!, () => <String>{})
+                .add(match[2]!);
           }
         }
-      } else {
-        final rawDate = data['dailyRewardDate'];
-        final rawIds = data['dailyRewardIds'];
-        if ((rawDate != null && (rawDate is! String || !_validDate(rawDate))) ||
-            rawIds is! List ||
-            rawIds.any((value) => value is! String || value.isEmpty) ||
-            (rawDate == null && rawIds.isNotEmpty)) {
-          return null;
+        for (final date in rewardLedger.keys.toList()) {
+          rewardLedger[date] = rewardLedger[date]!
+              .take(maxDailyRewardIdsPerDate)
+              .toSet();
         }
-        rewardDate = rawDate as String?;
-        rewardIds = rawIds.cast<String>().toSet();
+        final retainedDates = rewardLedger.keys.toList()..sort();
+        while (retainedDates.length > maxDailyRewardDates) {
+          rewardLedger.remove(retainedDates.removeAt(0));
+        }
+      } else {
+        if (version == 2) {
+          final rawDate = data['dailyRewardDate'];
+          final rawIds = data['dailyRewardIds'];
+          if ((rawDate != null &&
+                  (rawDate is! String || !_validDate(rawDate))) ||
+              rawIds is! List ||
+              rawIds.any((value) => value is! String || value.isEmpty) ||
+              rawIds.length > maxDailyRewardIdsPerDate ||
+              (rawDate == null && rawIds.isNotEmpty) ||
+              (rawIds.cast<String>().toSet().length != rawIds.length)) {
+            return null;
+          }
+          if (rawDate is String && rawIds.isNotEmpty) {
+            rewardLedger[rawDate] = rawIds.cast<String>().toSet();
+          }
+        } else {
+          final rawLedger = data['dailyRewardLedger'];
+          if (rawLedger is! List || rawLedger.length > maxDailyRewardDates) {
+            return null;
+          }
+          for (final item in rawLedger) {
+            if (item is! Map<String, dynamic> ||
+                item['date'] is! String ||
+                !_validDate(item['date'] as String) ||
+                item['ids'] is! List) {
+              return null;
+            }
+            final date = item['date'] as String;
+            final ids = item['ids'] as List;
+            if (rewardLedger.containsKey(date) ||
+                ids.length > maxDailyRewardIdsPerDate ||
+                ids.any((id) => id is! String || id.isEmpty) ||
+                ids.cast<String>().toSet().length != ids.length) {
+              return null;
+            }
+            rewardLedger[date] = ids.cast<String>().toSet();
+          }
+        }
       }
       if (balance < 0 ||
           balance > maxBalance ||
@@ -240,8 +263,7 @@ class GemWallet {
       return _WalletState(
         version,
         balance,
-        rewardDate,
-        rewardIds,
+        rewardLedger,
         purchaseValues.map((k, v) => MapEntry(k, v as int)),
       );
     } on FormatException {
@@ -254,20 +276,23 @@ class GemWallet {
   Future<void> _write(
     SharedPreferences prefs,
     int balance,
-    String? dailyRewardDate,
-    Set<String> dailyRewardIds,
+    Map<String, Set<String>> dailyRewardLedger,
     Map<String, int> purchases,
   ) async {
-    final ok = await prefs.setString(
-      _keys.key(stateKey),
-      jsonEncode({
-        'version': 2,
-        'balance': balance,
-        'dailyRewardDate': dailyRewardDate,
-        'dailyRewardIds': dailyRewardIds.toList()..sort(),
-        'purchases': purchases,
-      }),
-    );
+    final key = _keys.key(stateKey);
+    final value = jsonEncode({
+      'version': 3,
+      'balance': balance,
+      'dailyRewardLedger': dailyRewardLedger.entries
+          .map(
+            (entry) => {'date': entry.key, 'ids': entry.value.toList()..sort()},
+          )
+          .toList(),
+      'purchases': purchases,
+    });
+    final ok =
+        await (writeString?.call(prefs, key, value) ??
+            prefs.setString(key, value));
     if (!ok) throw StateError('Wallet transaction was not persisted.');
   }
 
@@ -287,17 +312,19 @@ class GemWallet {
   }
 }
 
+Map<String, Set<String>> _copyLedger(Map<String, Set<String>> source) => {
+  for (final entry in source.entries) entry.key: Set<String>.of(entry.value),
+};
+
 class _WalletState {
   const _WalletState(
     this.version,
     this.balance,
-    this.dailyRewardDate,
-    this.dailyRewardIds,
+    this.dailyRewardLedger,
     this.purchases,
   );
   final int version;
   final int balance;
-  final String? dailyRewardDate;
-  final Set<String> dailyRewardIds;
+  final Map<String, Set<String>> dailyRewardLedger;
   final Map<String, int> purchases;
 }

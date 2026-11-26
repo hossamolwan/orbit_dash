@@ -30,7 +30,7 @@ void main() {
           )!,
         ) as Map<String, dynamic>;
         expect(saved['balance'], 100);
-        expect(saved['dailyRewardIds'], isEmpty);
+        expect(saved['dailyRewardLedger'], isEmpty);
         expect(saved.containsKey('grants'), isFalse);
         expect(
           prefs
@@ -66,8 +66,17 @@ void main() {
         ) as Map<String, dynamic>;
         expect(wallet.balance, 17);
         expect(wallet.owns('ship.emerald'), isTrue);
-        expect(saved['version'], 2);
-        expect(saved['dailyRewardIds'], ['collect_gems']);
+        expect(saved['version'], 3);
+        expect(saved['dailyRewardLedger'], [
+          {
+            'date': '2026-10-17',
+            'ids': ['collect_gems'],
+          },
+          {
+            'date': '2026-10-16',
+            'ids': ['start_runs'],
+          },
+        ]);
         expect(
           prefs
               .getString(AccountScopedPreferences.localKey(GemWallet.stateKey))!

@@ -340,7 +340,7 @@ LocalDataDomainResult _wallet(Map<String, Object?> values) {
       );
     }
     final version = decoded['version'];
-    if (version is! int || (version != 1 && version != 2)) {
+    if (version is! int || (version != 1 && version != 2 && version != 3)) {
       return _result(
         LocalDataPresence.invalid,
         present: [key],
@@ -395,7 +395,7 @@ LocalDataDomainResult _wallet(Map<String, Object?> values) {
           issue: 'invalidLegacyGrants',
         );
       }
-    } else {
+    } else if (version == 2) {
       final date = decoded['dailyRewardDate'];
       final ids = decoded['dailyRewardIds'];
       if ((date != null &&
@@ -410,6 +410,42 @@ LocalDataDomainResult _wallet(Map<String, Object?> values) {
           version: version,
           issue: 'invalidRewardLedger',
         );
+      }
+    } else {
+      final ledger = decoded['dailyRewardLedger'];
+      if (ledger is! List || ledger.length > 30) {
+        return _result(
+          LocalDataPresence.invalid,
+          present: [key],
+          version: version,
+          issue: 'invalidRewardLedger',
+        );
+      }
+      final seenDates = <String>{};
+      for (final entry in ledger) {
+        if (entry is! Map<String, dynamic> ||
+            entry['date'] is! String ||
+            !LocalDataValidation.isValidCalendarDate(entry['date'] as String) ||
+            !seenDates.add(entry['date'] as String) ||
+            entry['ids'] is! List) {
+          return _result(
+            LocalDataPresence.invalid,
+            present: [key],
+            version: version,
+            issue: 'invalidRewardLedger',
+          );
+        }
+        final ids = entry['ids'] as List;
+        if (ids.length > 128 ||
+            ids.any((id) => id is! String || id.isEmpty) ||
+            ids.toSet().length != ids.length) {
+          return _result(
+            LocalDataPresence.invalid,
+            present: [key],
+            version: version,
+            issue: 'invalidRewardLedger',
+          );
+        }
       }
     }
     return _result(LocalDataPresence.present, present: [key], version: version);
